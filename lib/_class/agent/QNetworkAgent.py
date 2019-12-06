@@ -13,20 +13,9 @@ class QNetworkAgent(QLearningAgent):
         
         super().__init__(env, build_model=False, model_file=model_file)
         
-        # self.hyperparams_dict = {
-        #     'epsilon': {
-        #         'min': .01, 'max': 1., 'decay': .0005, 'value': 1.
-        #     },
-        #     'alpha': {
-        #         'min': .00001, 'max': .00001, 'decay': .0, 'value': .00001
-        #     },
-        #     'gamma': {
-        #         'min': .9, 'max': .9, 'increase': .0, 'value': .9
-        #     }
-        # }
         self.hyperparams_dict = {
             'epsilon': {
-                'min': .01, 'max': 1., 'decay': .1, 'value': 1.
+                'min': .01, 'max': 1., 'decay': .0005, 'value': 1.
             },
             'alpha': {
                 'min': .00001, 'max': .00001, 'decay': .0, 'value': .00001
