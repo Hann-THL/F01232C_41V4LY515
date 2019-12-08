@@ -4,9 +4,10 @@ import numpy as np
 import pandas as pd
 
 class ForexEnv:
-    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.8, stack_size=5):
+    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.8, stack_size=5, timeframe=5):
+        self.timeframe = timeframe
         self.__train_test_split(source_path, filename, nrows=nrows, train_size=train_size, train=train)
-        
+
         self.random_range = int(len(self.indexes) * random_size)
         self.stack_size   = stack_size
         
@@ -21,8 +22,8 @@ class ForexEnv:
         timeseries_df = pd.concat(df_chunks)
         
         # Convert tick data to OHLC
-        bid_df = timeseries_df.set_index('datetime')['bid'].resample('5Min').ohlc().reset_index()
-        ask_df = timeseries_df.set_index('datetime')['ask'].resample('5Min').ohlc().reset_index()
+        bid_df = timeseries_df.set_index('datetime')['bid'].resample(f'{self.timeframe}Min').ohlc().reset_index()
+        ask_df = timeseries_df.set_index('datetime')['ask'].resample(f'{self.timeframe}Min').ohlc().reset_index()
         
         row_count  = len(bid_df) if nrows is None else nrows
         split_size = round(row_count * train_size)
@@ -63,9 +64,7 @@ class ForexEnv:
         }
         
     def state_space(self):
-        return np.array(['entry_action', 'close_action', 'pip_change',
-                         'open_bid_diff', 'high_bid_diff', 'low_bid_diff', 'bid_diff',
-                         'open_ask_diff', 'high_ask_diff', 'low_ask_diff', 'ask_diff'])
+        return np.array(['default_entry', 'buy_entry', 'sell_entry', 'avg_bid_velocity', 'avg_ask_velocity'])
         
     def state_size(self):
         return len(self.state_space())
@@ -129,80 +128,53 @@ class ForexEnv:
             }
             return False
         
-        except:
+        except IndexError:
             self.timestep = {}
             return True
     
+    def update_observe_timestep(self):
+        self.observe_timestep = self.timestep.copy()
+
+    # TODO
     def scale_state(self, state):
-        entry_action, close_action, pip_change, \
-        open_bid_diff, high_bid_diff, low_bid_diff, bid_diff, \
-        open_ask_diff, high_ask_diff, low_ask_diff, ask_diff = state
-        
-        scaled_entry_action = scaler.min_max_scale(entry_action, -1, 1) # -1 = Default, 0 = Buy, 1 = Sell
-        scaled_close_action = scaler.min_max_scale(close_action, -1, 1) # -1 = Default, 0 = Buy, 1 = Sell
-        
-        return np.array([scaled_entry_action, scaled_close_action, pip_change,
-                         open_bid_diff, high_bid_diff, low_bid_diff, bid_diff,
-                         open_ask_diff, high_ask_diff, low_ask_diff, ask_diff])
+        return state
     
+    # TODO
     def scale_stack_states(self, stack_states):
-        entry_actions  = np.array([x[0] for x in stack_states])
-        close_actions  = np.array([x[1] for x in stack_states])
-        pip_changes    = np.array([x[2] for x in stack_states])
-        open_bid_diffs = np.array([x[3] for x in stack_states])
-        high_bid_diffs = np.array([x[4] for x in stack_states])
-        low_bid_diffs  = np.array([x[5] for x in stack_states])
-        bid_diffs      = np.array([x[6] for x in stack_states])
-        open_ask_diffs = np.array([x[7] for x in stack_states])
-        high_ask_diffs = np.array([x[8] for x in stack_states])
-        low_ask_diffs  = np.array([x[9] for x in stack_states])
-        ask_diffs      = np.array([x[10] for x in stack_states])
-        
-        scaled_entry_actions = scaler.min_max_scale(entry_actions, -1, 1) # -1 = Default, 0 = Buy, 1 = Sell
-        scaled_close_actions = scaler.min_max_scale(close_actions, -1, 1) # -1 = Default, 0 = Buy, 1 = Sell
-        
-        return np.vstack([scaled_entry_actions, scaled_close_actions, pip_changes,
-                          open_bid_diffs, high_bid_diffs, low_bid_diffs, bid_diffs,
-                          open_ask_diffs, high_ask_diffs, low_ask_diffs, ask_diffs]).transpose()
+        return stack_states
     
     def reset(self, random=True):
+        self.default_action = self.constant_values()['TRADE_ACTION']['DEFAULT']
+
         # Timestep
         index = np.random.choice(self.indexes[:self.random_range]) if random else 0
         index = self.stack_size -1 if index < self.stack_size else index
         
         # Stacked states
-        self.default_action = self.constant_values()['TRADE_ACTION']['DEFAULT']
-        entry_action = self.default_action
-        close_action = self.default_action
-        pip_change   = 0
-        
         self.stack_states = np.empty((self.stack_size, self.state_size()))
+
         for stack_index, x in enumerate(range(index +1 -self.stack_size, index +1)):
             if stack_index == 0:
                 self.update_timestep(x)
-                self.observe_open_bid = self.timestep['open_bid']
-                self.observe_high_bid = self.timestep['high_bid']
-                self.observe_low_bid  = self.timestep['low_bid']
-                self.observe_bid      = self.timestep['bid']
-                self.observe_open_ask = self.timestep['open_ask']
-                self.observe_high_ask = self.timestep['high_ask']
-                self.observe_low_ask  = self.timestep['low_ask']
-                self.observe_ask      = self.timestep['ask']
-            
-            open_bid_diff = self.open_bids[x] - self.observe_open_bid
-            high_bid_diff = self.high_bids[x] - self.observe_high_bid
-            low_bid_diff  = self.low_bids[x] - self.observe_low_bid
-            bid_diff      = self.bids[x] - self.observe_bid
-            open_ask_diff = self.open_asks[x] - self.observe_open_ask
-            high_ask_diff = self.high_asks[x] - self.observe_high_ask
-            low_ask_diff  = self.low_asks[x] - self.observe_low_ask
-            ask_diff      = self.asks[x] - self.observe_ask
-            
-            stack_state = np.array([entry_action, close_action, pip_change,
-                                    open_bid_diff, high_bid_diff, low_bid_diff, bid_diff,
-                                    open_ask_diff, high_ask_diff, low_ask_diff, ask_diff])
-            
-            # stack_state = np.round(stack_state, 5)
+                self.update_observe_timestep()
+
+            # Reference: https://www.wikihow.com/Calculate-Velocity
+            # Modified bid velocity to ensure it's having positive correlation with sell profit
+            openbid_velocity = (self.observe_timestep['open_bid'] - self.open_bids[x]) / 2
+            highbid_velocity = (self.observe_timestep['high_bid'] - self.high_bids[x]) / 2
+            lowbid_velocity  = (self.observe_timestep['low_bid'] - self.low_bids[x]) / 2
+            bid_velocity     = (self.observe_timestep['bid'] - self.bids[x]) / 2
+
+            openask_velocity = (self.open_asks[x] - self.observe_timestep['open_ask']) / 2
+            highask_velocity = (self.high_asks[x] - self.observe_timestep['high_ask']) / 2
+            lowask_velocity  = (self.low_asks[x] - self.observe_timestep['low_ask']) / 2
+            ask_velocity     = (self.asks[x] - self.observe_timestep['ask']) / 2
+
+            avg_bid_velocity = (openbid_velocity + highbid_velocity + lowbid_velocity + bid_velocity) / 4
+            avg_ask_velocity = (openask_velocity + highask_velocity + lowask_velocity + ask_velocity) / 4
+
+            stack_state = np.array([1, 0, 0, avg_bid_velocity, avg_ask_velocity])
+            stack_state = np.round(stack_state, 5)
             self.stack_states[stack_index] = stack_state
             
         self.update_timestep(x)
@@ -227,18 +199,13 @@ class ForexEnv:
         }
         return self.state
     
-    def step(self, action):
-        const_action_dict = self.constant_values()['TRADE_ACTION']
-        const_status_dict = self.constant_values()['TRADE_STATUS']
-        
-        trade_dict = self.trading_params_dict['trade_dict']
-        
+    def __trade_vars(self, trade_dict, action=None):
         # Get entry action & price
         # - if there's no entry action, treat current action as action to open a trade
         # - if there's entry action, treat current action as action to close a trade
         try:
             # NOTE: not to use pd.DataFrame() to convert trade_dict to dataframe, as it is slower
-            open_index      = trade_dict['status'].index(const_status_dict['OPEN'])
+            open_index      = trade_dict['status'].index(self.constant_values()['TRADE_STATUS']['OPEN'])
             trade_actions   = trade_dict['action'][open_index:]
             trade_prices    = trade_dict['price'][open_index:]
             trade_datetimes = trade_dict['datetime'][open_index:]
@@ -247,21 +214,32 @@ class ForexEnv:
             
             # Not allowed to close open trades with same entry action
             if entry_action == action:
-                trade_actions  = []
-                trade_prices   = []
-                trade_datetime = []
+                trade_actions   = []
+                trade_prices    = []
+                trade_datetimes = []
             
-        except:
-            trade_actions  = []
-            trade_prices   = []
-            trade_datetime = []
+        except ValueError:
+            trade_actions   = []
+            trade_prices    = []
+            trade_datetimes = []
 
             entry_action = self.default_action
+
+        return entry_action, trade_prices, trade_datetimes
+
+    def step(self, action):
+        const_action_dict = self.constant_values()['TRADE_ACTION']
+        const_status_dict = self.constant_values()['TRADE_STATUS']
+        
+        trade_dict = self.trading_params_dict['trade_dict']
+        entry_action, trade_prices, trade_datetimes = self.__trade_vars(trade_dict, action)
         
         
-        profit = 0.
-        closed_trade = False
+        profit            = 0.
+        float_profit      = 0.
+        closed_trade      = False
         sufficient_margin = True
+
         if action in [const_action_dict['BUY'], const_action_dict['SELL']]:
             # Close open trades
             for trade_index, trade_price in enumerate(trade_prices):
@@ -288,27 +266,21 @@ class ForexEnv:
                     sufficient_margin = False
                 self.trading_params_dict['acct_bal'] -= required_margin
             
-            
+            # Update trade transaction
             trade_dict['action'].append(action)
             trade_dict['datetime'].append(self.timestep['datetime'])
             trade_dict['price'].append(price)
             trade_dict['status'].append(const_status_dict['CLOSE_TRADE'] if closed_trade else const_status_dict['OPEN'])
             trade_dict['profits'].append(profit)
             trade_dict['acct_bal'].append(self.trading_params_dict['acct_bal'])
+
+            # Observe the price at current timestemp if open or closed trades, else observe the entry price
+            self.update_observe_timestep()
         
-        
-        # Calculate floating P/L
-        float_profit = 0.
-        if (entry_action != self.default_action) & (not closed_trade):
-            for trade_index, trade_price in enumerate(trade_prices):
-                float_profit += self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
-                
-            float_profit *= self.trading_params_dict['unit']
-            float_profit = round(float_profit, 5)
-          
-        # Pip change
-        pip_change = profit if closed_trade else float_profit
-        
+        # Update trade variables
+        entry_action, trade_prices, trade_datetimes = self.__trade_vars(trade_dict)
+
+
         # Done
         done = self.update_timestep(self.timestep['index'] +1)
         if not done:
@@ -323,38 +295,50 @@ class ForexEnv:
             # Consider closing trade as end of episode
             elif closed_trade:
                 done = True
-                
-        # Observe the price at current timestemp if open or closed trades, else observe the entry price
-        if not done and (closed_trade or action != const_action_dict['HOLD']):
-            self.observe_open_bid = self.timestep['open_bid']
-            self.observe_high_bid = self.timestep['high_bid']
-            self.observe_low_bid  = self.timestep['low_bid']
-            self.observe_bid      = self.timestep['bid']
-            self.observe_open_ask = self.timestep['open_ask']
-            self.observe_high_ask = self.timestep['high_ask']
-            self.observe_low_ask  = self.timestep['low_ask']
-            self.observe_ask      = self.timestep['ask']
-        
+
         # State
         if done:
-            next_state = np.array([self.default_action, self.default_action, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            next_state = np.array([1, 0, 0, 0, 0])
         else:
-            state_entry_action = self.default_action if closed_trade else self.state[0] if action == const_action_dict['HOLD'] else action
-            state_close_action = action if closed_trade else self.default_action
+            # Calculate floating P/L
+            float_profit = 0.
+            if (entry_action != self.default_action) & (not closed_trade):
+                for trade_index, trade_price in enumerate(trade_prices):
+                    float_profit += self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
+                
+                float_profit *= self.trading_params_dict['unit']
+                float_profit = round(float_profit, 5)
 
-            open_bid_diff = self.timestep['open_bid'] - self.observe_open_bid
-            high_bid_diff = self.timestep['high_bid'] - self.observe_high_bid
-            low_bid_diff  = self.timestep['low_bid'] - self.observe_low_bid
-            bid_diff      = self.timestep['bid'] - self.observe_bid
-            open_ask_diff = self.timestep['open_ask'] - self.observe_open_ask
-            high_ask_diff = self.timestep['high_ask'] - self.observe_high_ask
-            low_ask_diff  = self.timestep['low_ask'] - self.observe_low_ask
-            ask_diff      = self.timestep['ask'] - self.observe_ask
-            
-            next_state = np.array([state_entry_action, state_close_action, pip_change,
-                                   open_bid_diff, high_bid_diff, low_bid_diff, bid_diff,
-                                   open_ask_diff, high_ask_diff, low_ask_diff, ask_diff])
-            # next_state = np.round(next_state, 5)
+
+            # Velocity
+            openbid_velocity = (self.observe_timestep['open_bid'] - self.timestep['open_bid']) / 2
+            highbid_velocity = (self.observe_timestep['high_bid'] - self.timestep['high_bid']) / 2
+            lowbid_velocity  = (self.observe_timestep['low_bid'] - self.timestep['low_bid']) / 2
+            bid_velocity     = (self.observe_timestep['bid'] - self.timestep['bid']) / 2
+
+            openask_velocity = (self.timestep['open_ask'] - self.observe_timestep['open_ask']) / 2
+            highask_velocity = (self.timestep['high_ask'] - self.observe_timestep['high_ask']) / 2
+            lowask_velocity  = (self.timestep['low_ask'] - self.observe_timestep['low_ask']) / 2
+            ask_velocity     = (self.timestep['ask'] - self.observe_timestep['ask']) / 2
+
+            avg_bid_velocity = (openbid_velocity + highbid_velocity + lowbid_velocity + bid_velocity) / 4
+            avg_ask_velocity = (openask_velocity + highask_velocity + lowask_velocity + ask_velocity) / 4
+
+            state_actions  = [-1, 0, 1]
+            if closed_trade:
+                default_entry, buy_entry, sell_entry = 1, 0, 0
+
+            elif action == const_action_dict['HOLD']:
+                default_entry, buy_entry, sell_entry = self.state[:len(state_actions)]
+
+            else:
+                onehot_actions = np.zeros(len(state_actions), dtype=np.int8)
+                onehot_actions[state_actions.index(action)] = 1
+
+                default_entry, buy_entry, sell_entry = onehot_actions
+
+            next_state = np.array([default_entry, buy_entry, sell_entry, avg_bid_velocity, avg_ask_velocity])
+            next_state = np.round(next_state, 5)
             
         self.state = next_state
         
@@ -368,6 +352,6 @@ class ForexEnv:
         info_dict = {
             'closed_trade': closed_trade,
             'sufficient_margin': sufficient_margin,
-            'pip_change': pip_change
+            'float_profit': float_profit
         }
         return (self.state, reward, done, info_dict)
