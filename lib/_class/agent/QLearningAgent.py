@@ -94,8 +94,12 @@ class QLearningAgent(Agent):
         # Q[s, a] = Q[s, a] + alpha * (reward + gamma * Max[Q(s’, A)] - Q[s, a])
         max_q_value = np.max(self.main_model.state_values(next_state))
         q_value = self.main_model.state_action_value(state, action)
-        q_value = q_value + self.hyperparams_dict['alpha']['value'] * (reward + self.hyperparams_dict['gamma']['value'] * max_q_value - q_value)
-        self.main_model.set_state_action(state, action, round(q_value, 10))
+
+        if done:
+            q_value = reward
+        else:
+            q_value = q_value + self.hyperparams_dict['alpha']['value'] * (reward + self.hyperparams_dict['gamma']['value'] * max_q_value - q_value)
+        self.main_model.set_state_action(state, action, round(q_value, 5))
         
         # Adjust hyperparameters
         if done:

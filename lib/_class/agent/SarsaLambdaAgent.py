@@ -61,11 +61,11 @@ class SarsaLambdaAgent(SarsaAgent):
         td_error = q_target - q_value
         
         states_q_values = states_q_values + self.hyperparams_dict['alpha']['value'] * td_error * states_e_values
-        self.main_model.values = np.round(states_q_values, 10)
+        self.main_model.values = np.round(states_q_values, 5)
         
         # Decay & Update E-matrix
         states_e_values = states_e_values * self.hyperparams_dict['gamma']['value'] * self.hyperparams_dict['elig_trace']['lambda']
-        self.e_model.values = np.round(states_e_values, 10)
+        self.e_model.values = np.round(states_e_values, 5)
         
         # Adjust hyperparameters
         if done:
