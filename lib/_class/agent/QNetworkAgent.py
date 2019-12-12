@@ -15,7 +15,7 @@ class QNetworkAgent(QLearningAgent):
         
         self.hyperparams_dict = {
             'epsilon': {
-                'min': .01, 'max': 1., 'decay': .0005, 'value': 1.
+                'min': .01, 'max': 1., 'decay': .00025, 'value': 1.
             },
             'alpha': {
                 'min': .00001, 'max': .00001, 'decay': .0, 'value': .00001
