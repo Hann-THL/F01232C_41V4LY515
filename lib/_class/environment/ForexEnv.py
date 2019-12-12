@@ -47,6 +47,82 @@ class ForexEnv:
         self.high_asks = np.round(ask_df['high'].values, 5)
         self.low_asks  = np.round(ask_df['low'].values, 5)
         self.asks      = np.round(ask_df['close'].values, 5)
+
+        # Reference: https://www.youtube.com/watch?v=WZbOeFsSirM
+        # Calculate RSI
+        tmp_df = pd.DataFrame({
+            'datetime': self.datetimes,
+
+            'open_bid': self.open_bids,
+            'high_bid': self.high_bids,
+            'low_bid': self.low_bids,
+            'bid': self.bids,
+
+            'open_ask': self.open_asks,
+            'high_ask': self.high_asks,
+            'low_ask': self.low_asks,
+            'ask': self.asks
+        })
+
+        n_timestep = 14
+        tmp_df['bid_movement'] = tmp_df['bid'].diff()
+        tmp_df['ask_movement'] = tmp_df['ask'].diff()
+
+        tmp_df['bid_upward_movement']   = np.where(tmp_df['bid_movement'] > 0, tmp_df['bid_movement'], 0)
+        tmp_df['bid_downward_movement'] = np.where(tmp_df['bid_movement'] < 0, np.abs(tmp_df['bid_movement']), 0)
+
+        tmp_df['ask_upward_movement']   = np.where(tmp_df['ask_movement'] > 0, tmp_df['ask_movement'], 0)
+        tmp_df['ask_downward_movement'] = np.where(tmp_df['ask_movement'] < 0, np.abs(tmp_df['ask_movement']), 0)
+
+        tmp_df.at[n_timestep -1, 'bid_avg_upward_movement']   = tmp_df[['bid_upward_movement']][:n_timestep].values.mean()
+        tmp_df.at[n_timestep -1, 'bid_avg_downward_movement'] = tmp_df[['bid_downward_movement']][:n_timestep].values.mean()
+
+        tmp_df.at[n_timestep -1, 'ask_avg_upward_movement']   = tmp_df[['ask_upward_movement']][:n_timestep].values.mean()
+        tmp_df.at[n_timestep -1, 'ask_avg_downward_movement'] = tmp_df[['ask_downward_movement']][:n_timestep].values.mean()
+
+        tmp_df = tmp_df[n_timestep -1:].copy()
+        tmp_df.reset_index(inplace=True, drop=True)
+        
+        for row in tmp_df[1:].itertuples():
+            tmp_df.at[row.Index, 'bid_avg_upward_movement']   = (tmp_df.at[row.Index -1, 'bid_avg_upward_movement'] * (n_timestep -1) + row.bid_upward_movement) / n_timestep
+            tmp_df.at[row.Index, 'bid_avg_downward_movement'] = (tmp_df.at[row.Index -1, 'bid_avg_downward_movement'] * (n_timestep -1) + row.bid_downward_movement) / n_timestep
+
+            tmp_df.at[row.Index, 'ask_avg_upward_movement']   = (tmp_df.at[row.Index -1, 'ask_avg_upward_movement'] * (n_timestep -1) + row.ask_upward_movement) / n_timestep
+            tmp_df.at[row.Index, 'ask_avg_downward_movement'] = (tmp_df.at[row.Index -1, 'ask_avg_downward_movement'] * (n_timestep -1) + row.ask_downward_movement) / n_timestep
+    
+        tmp_df['bid_relative_strength'] = tmp_df['bid_avg_upward_movement'] / tmp_df['bid_avg_downward_movement']
+        tmp_df['ask_relative_strength'] = tmp_df['ask_avg_upward_movement'] / tmp_df['ask_avg_downward_movement']
+
+        tmp_df['bid_rsi'] = 100 - (100 / (tmp_df['bid_relative_strength'] + 1))
+        tmp_df['ask_rsi'] = 100 - (100 / (tmp_df['ask_relative_strength'] + 1))
+
+        tmp_df.drop(columns=[
+            'bid_movement', 'ask_movement',
+            'bid_upward_movement', 'bid_downward_movement',
+            'ask_upward_movement', 'ask_downward_movement',
+            'bid_avg_upward_movement', 'bid_avg_downward_movement',
+            'ask_avg_upward_movement', 'ask_avg_downward_movement',
+            'bid_relative_strength', 'ask_relative_strength'
+        ], inplace=True)
+
+        self.indexes   = tmp_df.index.values
+        self.datetimes = tmp_df['datetime'].values
+        
+        self.open_bids = np.round(tmp_df['open_bid'].values, 5)
+        self.high_bids = np.round(tmp_df['high_bid'].values, 5)
+        self.low_bids  = np.round(tmp_df['low_bid'].values, 5)
+        self.bids      = np.round(tmp_df['bid'].values, 5)
+        self.bids_rsi  = np.round(tmp_df['bid_rsi'].values, 0)
+        
+        self.open_asks = np.round(tmp_df['open_ask'].values, 5)
+        self.high_asks = np.round(tmp_df['high_ask'].values, 5)
+        self.low_asks  = np.round(tmp_df['low_ask'].values, 5)
+        self.asks      = np.round(tmp_df['ask'].values, 5)
+        self.asks_rsi  = np.round(tmp_df['ask_rsi'].values, 0)
+
+        max_bid_profit = round(self.bids.max() - self.bids.min(), 5) * 100_000
+        max_ask_profit = round(self.asks.max() - self.asks.min(), 5) * 100_000
+        self.estimate_max_profit = round((max_bid_profit + max_ask_profit) / 2, 0)
         
     def constant_values(self):
         return {
@@ -64,7 +140,7 @@ class ForexEnv:
         }
         
     def state_space(self):
-        return np.array(['default_entry', 'buy_entry', 'sell_entry', 'avg_bid_velocity', 'avg_ask_velocity'])
+        return np.array(['buy_float_profit', 'ask_rsi', 'sell_float_profit', 'bid_rsi'])
         
     def state_size(self):
         return len(self.state_space())
@@ -120,11 +196,13 @@ class ForexEnv:
                 'high_bid': self.high_bids[index],
                 'low_bid':  self.low_bids[index],
                 'bid':      self.bids[index],
+                'bid_rsi':  self.bids_rsi[index],
                 
                 'open_ask': self.open_asks[index],
                 'high_ask': self.high_asks[index],
                 'low_ask':  self.low_asks[index],
-                'ask':      self.asks[index]
+                'ask':      self.asks[index],
+                'ask_rsi':  self.asks_rsi[index]
             }
             return False
         
@@ -135,12 +213,21 @@ class ForexEnv:
     def update_observe_timestep(self):
         self.observe_timestep = self.timestep.copy()
 
-    # TODO
-    def scale_state(self, state):
-        return state
+    def normalize_reward(self, reward):
+        return round(reward / self.estimate_max_profit, 2)
+
+    def normalize_state(self, state):
+        buy_float_profit, ask_rsi, sell_float_profit, bid_rsi = state
+
+        norm_buy_fp   = scaler.clipping(buy_float_profit, self.estimate_max_profit)
+        norm_sell_fp  = scaler.clipping(sell_float_profit, self.estimate_max_profit)
+        norm_bid_rsi  = np.round(bid_rsi / 100, 2)
+        norm_ask_rsi  = np.round(ask_rsi / 100, 2)
+
+        return np.array([norm_buy_fp, norm_ask_rsi, norm_sell_fp, norm_bid_rsi])
     
     # TODO
-    def scale_stack_states(self, stack_states):
+    def normalize_stack_states(self, stack_states):
         return stack_states
     
     def reset(self, random=True):
@@ -158,23 +245,7 @@ class ForexEnv:
                 self.update_timestep(x)
                 self.update_observe_timestep()
 
-            # Reference: https://www.wikihow.com/Calculate-Velocity
-            # Modified bid velocity to ensure it's having positive correlation with sell profit
-            openbid_velocity = (self.observe_timestep['open_bid'] - self.open_bids[x]) / 2
-            highbid_velocity = (self.observe_timestep['high_bid'] - self.high_bids[x]) / 2
-            lowbid_velocity  = (self.observe_timestep['low_bid'] - self.low_bids[x]) / 2
-            bid_velocity     = (self.observe_timestep['bid'] - self.bids[x]) / 2
-
-            openask_velocity = (self.open_asks[x] - self.observe_timestep['open_ask']) / 2
-            highask_velocity = (self.high_asks[x] - self.observe_timestep['high_ask']) / 2
-            lowask_velocity  = (self.low_asks[x] - self.observe_timestep['low_ask']) / 2
-            ask_velocity     = (self.asks[x] - self.observe_timestep['ask']) / 2
-
-            avg_bid_velocity = (openbid_velocity + highbid_velocity + lowbid_velocity + bid_velocity) / 4
-            avg_ask_velocity = (openask_velocity + highask_velocity + lowask_velocity + ask_velocity) / 4
-
-            stack_state = np.array([1, 0, 0, avg_bid_velocity, avg_ask_velocity])
-            stack_state = np.round(stack_state, 5)
+            stack_state = np.array([0, self.asks_rsi[x], 0, self.bids_rsi[x]])
             self.stack_states[stack_index] = stack_state
             
         self.update_timestep(x)
@@ -294,11 +365,11 @@ class ForexEnv:
                 
             # Consider closing trade as end of episode
             elif closed_trade:
-                done = True
+               done = True
 
         # State
         if done:
-            next_state = np.array([1, 0, 0, 0, 0])
+            next_state = np.array([0, 0, 0, 0])
         else:
             # Calculate floating P/L
             float_profit = 0.
@@ -309,36 +380,9 @@ class ForexEnv:
                 float_profit *= self.trading_params_dict['unit']
                 float_profit = round(float_profit, 5)
 
-
-            # Velocity
-            openbid_velocity = (self.observe_timestep['open_bid'] - self.timestep['open_bid']) / 2
-            highbid_velocity = (self.observe_timestep['high_bid'] - self.timestep['high_bid']) / 2
-            lowbid_velocity  = (self.observe_timestep['low_bid'] - self.timestep['low_bid']) / 2
-            bid_velocity     = (self.observe_timestep['bid'] - self.timestep['bid']) / 2
-
-            openask_velocity = (self.timestep['open_ask'] - self.observe_timestep['open_ask']) / 2
-            highask_velocity = (self.timestep['high_ask'] - self.observe_timestep['high_ask']) / 2
-            lowask_velocity  = (self.timestep['low_ask'] - self.observe_timestep['low_ask']) / 2
-            ask_velocity     = (self.timestep['ask'] - self.observe_timestep['ask']) / 2
-
-            avg_bid_velocity = (openbid_velocity + highbid_velocity + lowbid_velocity + bid_velocity) / 4
-            avg_ask_velocity = (openask_velocity + highask_velocity + lowask_velocity + ask_velocity) / 4
-
-            state_actions  = [-1, 0, 1]
-            if closed_trade:
-                default_entry, buy_entry, sell_entry = 1, 0, 0
-
-            elif action == const_action_dict['HOLD']:
-                default_entry, buy_entry, sell_entry = self.state[:len(state_actions)]
-
-            else:
-                onehot_actions = np.zeros(len(state_actions), dtype=np.int8)
-                onehot_actions[state_actions.index(action)] = 1
-
-                default_entry, buy_entry, sell_entry = onehot_actions
-
-            next_state = np.array([default_entry, buy_entry, sell_entry, avg_bid_velocity, avg_ask_velocity])
-            next_state = np.round(next_state, 5)
+            buy_float_profit  = float_profit if entry_action == const_action_dict['BUY'] else 0
+            sell_float_profit = float_profit if entry_action == const_action_dict['SELL'] else 0
+            next_state = np.array([buy_float_profit, self.timestep['ask_rsi'], sell_float_profit, self.timestep['bid_rsi']])
             
         self.state = next_state
         
@@ -352,6 +396,7 @@ class ForexEnv:
         info_dict = {
             'closed_trade': closed_trade,
             'sufficient_margin': sufficient_margin,
-            'float_profit': float_profit
+            'float_profit': float_profit,
+            'have_open': len(trade_prices) > 0
         }
         return (self.state, reward, done, info_dict)
