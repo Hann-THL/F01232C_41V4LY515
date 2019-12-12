@@ -5,10 +5,10 @@ import tensorflow.keras.backend as K
 from tensorflow.keras.utils import plot_model
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Input, Dense, Add, Subtract, Lambda
-from tensorflow.keras.layers import BatchNormalization, Activation, ReLU, LeakyReLU, PReLU, ELU
+from tensorflow.keras.layers import BatchNormalization, Dropout, Activation, ReLU, LeakyReLU, PReLU, ELU
 from tensorflow.keras.layers import Conv1D, MaxPool1D, GlobalMaxPooling1D, Flatten
 from tensorflow.keras.optimizers import RMSprop, Adam
-from tensorflow.keras.losses import Huber
+from tensorflow.keras.losses import Huber, MeanSquaredError
 from tensorflow.keras.constraints import max_norm
 
 class NNModel:
@@ -28,12 +28,12 @@ class NNModel:
         outputs = self.__output_layer(layer)
     
         self.model = Model(inputs=inputs, outputs=outputs)
-        # self.model.compile(optimizer=RMSprop(lr=alpha), loss='mse')
-        # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=1.), loss='mse')
+        self.model.compile(optimizer=RMSprop(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=MeanSquaredError())
+        # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5.), loss=MeanSquaredError())
         
         # Reference: https://medium.com/@jonathan_hui/rl-dqn-deep-q-network-e207751f7ae4
-        # self.model.compile(optimizer=RMSprop(lr=alpha), loss=Huber(delta=1.0))
-        self.model.compile(optimizer=Adam(lr=alpha, clipnorm=1.), loss=Huber(delta=1.0))
+        # self.model.compile(optimizer=RMSprop(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=Huber(delta=1.0))
+        # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5.), loss=Huber(delta=1.0))
     
     def __input_layer(self):
         if self.network_type == 'conv1d':
@@ -58,10 +58,13 @@ class NNModel:
             return connected_layer
         
         for index, neuron in enumerate(self.neurons):
-            # Reference: https://machinelearningmastery.com/how-to-reduce-overfitting-in-deep-neural-networks-with-weight-constraints-in-keras/
+            # Reference:
+            # - https://machinelearningmastery.com/how-to-reduce-overfitting-in-deep-neural-networks-with-weight-constraints-in-keras/
+            # - https://vincentblog.xyz/posts/dropout-and-batch-normalization
             layer = Dense(neuron,
                           kernel_initializer='he_uniform',
                           kernel_constraint=max_norm(3),
+                          use_bias=False,
                           name=f'Hidden_{index}')(connected_layer if index == 0 else layer)
             
             # Reference: https://medium.com/luminovo/a-refresher-on-batch-re-normalization-5e0a1e902960
@@ -72,6 +75,8 @@ class NNModel:
             # layer = LeakyReLU(alpha=.001)(layer)
             # layer = ELU()(layer)
             # layer = ReLU(max_value=6)(layer)
+
+            layer = Dropout(rate=.2)(layer)
         return layer
     
     def __output_layer(self, connected_layer):
@@ -89,8 +94,10 @@ class NNModel:
             outputs = Add(name='Value_Advantage')([val, adv])
         
         else:
-            outputs = Dense(self.action_size, name='Output')(connected_layer)
-            outputs = BatchNormalization(scale=False, renorm=True, renorm_clipping={ 'rmax': 1, 'rmin': 0, 'dmax': 0 })(outputs)
+            outputs = Dense(self.action_size,
+                            kernel_initializer='he_uniform',
+                            name='Output')(connected_layer)
+            # outputs = BatchNormalization(scale=False, renorm=True, renorm_clipping={ 'rmax': 1, 'rmin': 0, 'dmax': 0 })(outputs)
             outputs = Activation('linear')(outputs)
             
         return outputs
@@ -104,7 +111,7 @@ class NNModel:
         self.model.save(f'{out_path}{filename}')
         
     def load_model_checkpoint(self, source_path, filename):
-        self.model = load_model(f'{source_path}{self.model_file}')
+        self.model = load_model(f'{source_path}{filename}')
         
     def get_weights(self):
         return self.model.get_weights()
@@ -118,7 +125,8 @@ class NNModel:
     def train(self, inputs, targets):
         # TODO - implement early stopping
         # Reference: https://lambdalabs.com/blog/tensorflow-2-0-tutorial-04-early-stopping/
-        epochs  = 20
+        # epochs  = 20
+        epochs  = 1
         history = self.model.fit(inputs, targets, epochs=epochs, verbose=0, batch_size=len(inputs))
         
         # generator = DataGenerator(inputs, targets, batch_size=1)
