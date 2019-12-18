@@ -10,7 +10,7 @@ class QLearningAgent(Agent):
         
         self.hyperparams_dict = {
             'epsilon': {
-                'min': .01, 'max': 1., 'decay': .0005, 'value': 1.
+                'min': .1, 'max': 1., 'decay': .00025, 'value': 1.
             },
             'alpha': {
                 'min': .00001, 'max': .9, 'decay': .001, 'value': .9
@@ -41,7 +41,7 @@ class QLearningAgent(Agent):
         
         try:
             return np.random.choice(indexes)
-        except TypeOfError as error:
+        except ValueError as error:
             if not random_if_empty:
                 raise Exception(error)
                 
