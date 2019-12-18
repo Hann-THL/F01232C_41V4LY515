@@ -3,8 +3,20 @@ import lib._util.scaler as scaler
 import numpy as np
 import pandas as pd
 
+'''
+Reference:
+- https://www.babypips.com/learn/forex/margin-call-exemplified
+- https://www.babypips.com/learn/forex/pips-and-pipettes
+- https://www.babypips.com/learn/forex/lots-leverage-and-profit-and-loss
+- https://www.youtube.com/watch?v=Amt7foVw5YE
+- https://www.youtube.com/watch?v=RgmDywzNlZA
+'''
 class ForexEnv:
-    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.8, stack_size=5, timeframe=5):
+    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.5, stack_size=5, timeframe=5):
+        self.measure_unit = 10_000 # JPY = 100
+        self.leverage     = 10
+        self.trade_unit   = 100_000
+
         self.timeframe = timeframe
         self.__train_test_split(source_path, filename, nrows=nrows, train_size=train_size, train=train)
 
@@ -14,122 +26,52 @@ class ForexEnv:
     def __train_test_split(self, source_path, filename, chunk_size=50_000, nrows=None, train_size=.7, train=True):
         source_file = f'{source_path}{filename}'
         df_chunks = pd.read_csv(source_file, sep=',',
-                                header=None, names=['datetime', 'bid', 'ask', 'vol'],
-                                usecols=['datetime', 'bid', 'ask'],
                                 parse_dates=['datetime'],
-                                date_parser=lambda x: pd.to_datetime(x, format="%Y%m%d %H%M%S%f"),
+                                date_parser=lambda x: pd.to_datetime(x, format='%Y-%m-%d'),
                                 chunksize=chunk_size, nrows=nrows)
         timeseries_df = pd.concat(df_chunks)
         
-        # Convert tick data to OHLC
-        bid_df = timeseries_df.set_index('datetime')['bid'].resample(f'{self.timeframe}Min').ohlc().reset_index()
-        ask_df = timeseries_df.set_index('datetime')['ask'].resample(f'{self.timeframe}Min').ohlc().reset_index()
-        
-        row_count  = len(bid_df) if nrows is None else nrows
+        row_count  = len(timeseries_df) if nrows is None else nrows
         split_size = round(row_count * train_size)
         
         if train:
-            bid_df = bid_df[:split_size]
-            ask_df = ask_df[:split_size]
+            timeseries_df = timeseries_df[:split_size]
         else:
-            bid_df = bid_df[split_size:]
-            ask_df = ask_df[split_size:]
+            timeseries_df = timeseries_df[split_size:]
+
+        self.indexes   = timeseries_df.index.values
+        self.datetimes = timeseries_df['datetime'].values
         
-        self.indexes   = bid_df.index.values
-        self.datetimes = bid_df['datetime'].values
+        self.open_bids = np.round(timeseries_df['open_bid'].values, 5)
+        self.high_bids = np.round(timeseries_df['high_bid'].values, 5)
+        self.low_bids  = np.round(timeseries_df['low_bid'].values, 5)
+        self.bids      = np.round(timeseries_df['bid'].values, 5)
+        self.bids_rsi  = np.round(timeseries_df['bid_rsi'].values, 0)
         
-        self.open_bids = np.round(bid_df['open'].values, 5)
-        self.high_bids = np.round(bid_df['high'].values, 5)
-        self.low_bids  = np.round(bid_df['low'].values, 5)
-        self.bids      = np.round(bid_df['close'].values, 5)
-        
-        self.open_asks = np.round(ask_df['open'].values, 5)
-        self.high_asks = np.round(ask_df['high'].values, 5)
-        self.low_asks  = np.round(ask_df['low'].values, 5)
-        self.asks      = np.round(ask_df['close'].values, 5)
+        self.open_asks = np.round(timeseries_df['open_ask'].values, 5)
+        self.high_asks = np.round(timeseries_df['high_ask'].values, 5)
+        self.low_asks  = np.round(timeseries_df['low_ask'].values, 5)
+        self.asks      = np.round(timeseries_df['ask'].values, 5)
+        self.asks_rsi  = np.round(timeseries_df['ask_rsi'].values, 0)
 
-        # Reference: https://www.youtube.com/watch?v=WZbOeFsSirM
-        # Calculate RSI
-        tmp_df = pd.DataFrame({
-            'datetime': self.datetimes,
+        # Calculate estimated max. profit
+        # const_action_dict = self.constant_values()['TRADE_ACTION']
+        # min_ask           = self.asks.min()
+        # max_bid           = self.bids.max()
+        # max_buy_reward    = self.__profit_by_action(const_action_dict['BUY'], min_ask, max_bid, None)
+        # max_sell_reward   = self.__profit_by_action(const_action_dict['SELL'], max_bid, None, min_ask)
+        # self.estimate_max_reward = max(max_buy_reward, max_sell_reward)
 
-            'open_bid': self.open_bids,
-            'high_bid': self.high_bids,
-            'low_bid': self.low_bids,
-            'bid': self.bids,
-
-            'open_ask': self.open_asks,
-            'high_ask': self.high_asks,
-            'low_ask': self.low_asks,
-            'ask': self.asks
-        })
-
-        n_timestep = 14
-        tmp_df['bid_movement'] = tmp_df['bid'].diff()
-        tmp_df['ask_movement'] = tmp_df['ask'].diff()
-
-        tmp_df['bid_upward_movement']   = np.where(tmp_df['bid_movement'] > 0, tmp_df['bid_movement'], 0)
-        tmp_df['bid_downward_movement'] = np.where(tmp_df['bid_movement'] < 0, np.abs(tmp_df['bid_movement']), 0)
-
-        tmp_df['ask_upward_movement']   = np.where(tmp_df['ask_movement'] > 0, tmp_df['ask_movement'], 0)
-        tmp_df['ask_downward_movement'] = np.where(tmp_df['ask_movement'] < 0, np.abs(tmp_df['ask_movement']), 0)
-
-        tmp_df.at[n_timestep -1, 'bid_avg_upward_movement']   = tmp_df[['bid_upward_movement']][:n_timestep].values.mean()
-        tmp_df.at[n_timestep -1, 'bid_avg_downward_movement'] = tmp_df[['bid_downward_movement']][:n_timestep].values.mean()
-
-        tmp_df.at[n_timestep -1, 'ask_avg_upward_movement']   = tmp_df[['ask_upward_movement']][:n_timestep].values.mean()
-        tmp_df.at[n_timestep -1, 'ask_avg_downward_movement'] = tmp_df[['ask_downward_movement']][:n_timestep].values.mean()
-
-        tmp_df = tmp_df[n_timestep -1:].copy()
-        tmp_df.reset_index(inplace=True, drop=True)
-        
-        for row in tmp_df[1:].itertuples():
-            tmp_df.at[row.Index, 'bid_avg_upward_movement']   = (tmp_df.at[row.Index -1, 'bid_avg_upward_movement'] * (n_timestep -1) + row.bid_upward_movement) / n_timestep
-            tmp_df.at[row.Index, 'bid_avg_downward_movement'] = (tmp_df.at[row.Index -1, 'bid_avg_downward_movement'] * (n_timestep -1) + row.bid_downward_movement) / n_timestep
-
-            tmp_df.at[row.Index, 'ask_avg_upward_movement']   = (tmp_df.at[row.Index -1, 'ask_avg_upward_movement'] * (n_timestep -1) + row.ask_upward_movement) / n_timestep
-            tmp_df.at[row.Index, 'ask_avg_downward_movement'] = (tmp_df.at[row.Index -1, 'ask_avg_downward_movement'] * (n_timestep -1) + row.ask_downward_movement) / n_timestep
-    
-        tmp_df['bid_relative_strength'] = tmp_df['bid_avg_upward_movement'] / tmp_df['bid_avg_downward_movement']
-        tmp_df['ask_relative_strength'] = tmp_df['ask_avg_upward_movement'] / tmp_df['ask_avg_downward_movement']
-
-        tmp_df['bid_rsi'] = 100 - (100 / (tmp_df['bid_relative_strength'] + 1))
-        tmp_df['ask_rsi'] = 100 - (100 / (tmp_df['ask_relative_strength'] + 1))
-
-        tmp_df.drop(columns=[
-            'bid_movement', 'ask_movement',
-            'bid_upward_movement', 'bid_downward_movement',
-            'ask_upward_movement', 'ask_downward_movement',
-            'bid_avg_upward_movement', 'bid_avg_downward_movement',
-            'ask_avg_upward_movement', 'ask_avg_downward_movement',
-            'bid_relative_strength', 'ask_relative_strength'
-        ], inplace=True)
-
-        self.indexes   = tmp_df.index.values
-        self.datetimes = tmp_df['datetime'].values
-        
-        self.open_bids = np.round(tmp_df['open_bid'].values, 5)
-        self.high_bids = np.round(tmp_df['high_bid'].values, 5)
-        self.low_bids  = np.round(tmp_df['low_bid'].values, 5)
-        self.bids      = np.round(tmp_df['bid'].values, 5)
-        self.bids_rsi  = np.round(tmp_df['bid_rsi'].values, 0)
-        
-        self.open_asks = np.round(tmp_df['open_ask'].values, 5)
-        self.high_asks = np.round(tmp_df['high_ask'].values, 5)
-        self.low_asks  = np.round(tmp_df['low_ask'].values, 5)
-        self.asks      = np.round(tmp_df['ask'].values, 5)
-        self.asks_rsi  = np.round(tmp_df['ask_rsi'].values, 0)
-
-        max_bid_profit = round(self.bids.max() - self.bids.min(), 5) * 100_000
-        max_ask_profit = round(self.asks.max() - self.asks.min(), 5) * 100_000
-        self.estimate_max_profit = round((max_bid_profit + max_ask_profit) / 2, 0)
+        # Calculate estimated max. pip change
+        self.estimate_max_reward  = round((np.max(self.bids) - np.min(self.asks)) * self.measure_unit, 1)
         
     def constant_values(self):
         return {
             'TRADE_STATUS': {
                 'OPEN': 'OPEN',
                 'CLOSE': 'CLOSED',
-                'CLOSE_TRADE': 'CLOSE_TRADE'
+                'CLOSE_TRADE': 'CLOSE_TRADE',
+                'MARGIN_CALL': 'MARGIN_CALL'
             },
             'TRADE_ACTION': {
                 'DEFAULT': -1,
@@ -140,7 +82,7 @@ class ForexEnv:
         }
         
     def state_space(self):
-        return np.array(['buy_float_profit', 'ask_rsi', 'sell_float_profit', 'bid_rsi'])
+        return np.array(['buy_float_reward', 'ask_rsi', 'sell_float_reward', 'bid_rsi'])
         
     def state_size(self):
         return len(self.state_space())
@@ -157,34 +99,38 @@ class ForexEnv:
         actions = self.action_space()
         
         # Have open trades
-        trade_dict = self.trading_params_dict['trade_dict']
-        if const_status_dict['OPEN'] in trade_dict['status']:
-            open_index  = trade_dict['status'].index(const_status_dict['OPEN'])
-            open_action = trade_dict['action'][open_index]
+        if const_status_dict['OPEN'] in self.trade_dict['status']:
+            open_index  = self.trade_dict['status'].index(const_status_dict['OPEN'])
+            open_action = self.trade_dict['action'][open_index]
 
             # Ensure agent is able to have only 1 open trade while trading
             actions.remove(open_action)
         return actions
     
-    def __price_by_action(self, action, bid, ask, closed_trade):
+    def __price_by_action(self, action, bid, ask):
         const_action_dict = self.constant_values()['TRADE_ACTION']
-        
-        # Close trade by Selling at Ask price, and Buying at Bid price
-        if closed_trade:
-            return bid if action == const_action_dict['BUY'] else ask
-        
-        # Open trade by Buying at Ask price, and Selling at Bid price
-        else:
-            return ask if action == const_action_dict['BUY'] else bid
+
+        # Buy at ask price, Sell at bid price
+        return bid if action == const_action_dict['SELL'] else ask if action == const_action_dict['BUY'] else 0
     
     def __profit_by_action(self, entry_action, entry_price, curr_bid, curr_ask):
         const_action_dict = self.constant_values()['TRADE_ACTION']
+
         if entry_action == const_action_dict['BUY']:
-            return curr_ask - entry_price
-        
+            close_price = curr_bid
+            movement    = close_price - entry_price
+
         elif entry_action == const_action_dict['SELL']:
-            return entry_price - curr_bid
-        return 0
+            close_price = curr_ask
+            movement    = entry_price - close_price
+
+        else:
+            movement = 0
+
+        pip_change = round(movement * self.measure_unit, 1)
+        profit     = ((1 / self.measure_unit) / close_price) * self.trade_unit * pip_change
+
+        return round(profit, 2), pip_change
     
     def update_timestep(self, index):
         try:
@@ -214,15 +160,15 @@ class ForexEnv:
         self.observe_timestep = self.timestep.copy()
 
     def normalize_reward(self, reward):
-        return round(reward / self.estimate_max_profit, 2)
+        return round(reward / self.estimate_max_reward, 2)
 
     def normalize_state(self, state):
-        buy_float_profit, ask_rsi, sell_float_profit, bid_rsi = state
+        buy_float_reward, ask_rsi, sell_float_reward, bid_rsi = state
 
-        norm_buy_fp   = scaler.clipping(buy_float_profit, self.estimate_max_profit)
-        norm_sell_fp  = scaler.clipping(sell_float_profit, self.estimate_max_profit)
-        norm_bid_rsi  = np.round(bid_rsi / 100, 2)
-        norm_ask_rsi  = np.round(ask_rsi / 100, 2)
+        norm_buy_fp  = scaler.clipping(buy_float_reward, self.estimate_max_reward)
+        norm_sell_fp = scaler.clipping(sell_float_reward, self.estimate_max_reward)
+        norm_bid_rsi = np.round(bid_rsi / 100, 2)
+        norm_ask_rsi = np.round(ask_rsi / 100, 2)
 
         return np.array([norm_buy_fp, norm_ask_rsi, norm_sell_fp, norm_bid_rsi])
     
@@ -230,7 +176,7 @@ class ForexEnv:
     def normalize_stack_states(self, stack_states):
         return stack_states
     
-    def reset(self, random=True):
+    def reset(self, random=False):
         self.default_action = self.constant_values()['TRADE_ACTION']['DEFAULT']
 
         # Timestep
@@ -254,32 +200,31 @@ class ForexEnv:
         self.state = stack_state
         
         # Trading
-        self.trading_params_dict = {
-            'orig_bal': 100_000.,
-            'acct_bal': 100_000.,
-            'unit':     100_000.,
-            
-            'trade_dict': {
-                'action':   [],
-                'datetime': [],
-                'price':    [],
-                'status':   [],
-                'profits':  [],
-                'acct_bal': []
-            }
+        self.acct_bal      = 10_500.
+        self.equity        = self.acct_bal
+        self.usable_margin = self.equity
+        self.used_margin   = 0.
+
+        self.trade_dict = {
+            'action':   [],
+            'datetime': [],
+            'price':    [],
+            'status':   [],
+            'profits':  [],
+            'acct_bal': []
         }
         return self.state
     
-    def __trade_vars(self, trade_dict, action=None):
+    def __trade_vars(self, action=None):
         # Get entry action & price
         # - if there's no entry action, treat current action as action to open a trade
         # - if there's entry action, treat current action as action to close a trade
         try:
             # NOTE: not to use pd.DataFrame() to convert trade_dict to dataframe, as it is slower
-            open_index      = trade_dict['status'].index(self.constant_values()['TRADE_STATUS']['OPEN'])
-            trade_actions   = trade_dict['action'][open_index:]
-            trade_prices    = trade_dict['price'][open_index:]
-            trade_datetimes = trade_dict['datetime'][open_index:]
+            open_index      = self.trade_dict['status'].index(self.constant_values()['TRADE_STATUS']['OPEN'])
+            trade_actions   = self.trade_dict['action'][open_index:]
+            trade_prices    = self.trade_dict['price'][open_index:]
+            trade_datetimes = self.trade_dict['datetime'][open_index:]
             
             entry_action = trade_actions[0]
             
@@ -298,74 +243,95 @@ class ForexEnv:
 
         return entry_action, trade_prices, trade_datetimes
 
+    def __update_equity(self, float_profit):
+        self.equity = self.acct_bal + float_profit
+        self.__update_usable_margin()
+
+    def __update_used_margin(self, used_margin=None, required_margin=0):
+        self.used_margin   = self.used_margin if used_margin is None else used_margin
+        self.used_margin   += required_margin
+        self.__update_usable_margin()
+
+    def __update_usable_margin(self):
+        self.usable_margin = round(self.equity - self.used_margin, 2)
+
+    def __add_transaction(self, action, profit, closed_trade=False, margin_call=False):
+        const_status_dict = self.constant_values()['TRADE_STATUS']
+        price             = self.__price_by_action(action, self.timestep['bid'], self.timestep['ask'])
+
+        self.trade_dict['action'].append(action)
+        self.trade_dict['datetime'].append(self.timestep['datetime'])
+        self.trade_dict['price'].append(price)
+        self.trade_dict['status'].append(const_status_dict['MARGIN_CALL'] if margin_call else \
+                                         const_status_dict['CLOSE_TRADE'] if closed_trade else \
+                                         const_status_dict['OPEN'])
+        self.trade_dict['profits'].append(profit)
+        self.trade_dict['acct_bal'].append(self.acct_bal)
+
+    def close_trade(self, profit):
+        self.__update_used_margin(used_margin=0)
+        self.__update_equity(profit)
+        self.acct_bal = self.equity
+
     def step(self, action):
         const_action_dict = self.constant_values()['TRADE_ACTION']
         const_status_dict = self.constant_values()['TRADE_STATUS']
         
-        trade_dict = self.trading_params_dict['trade_dict']
-        entry_action, trade_prices, trade_datetimes = self.__trade_vars(trade_dict, action)
+        entry_action, trade_prices, trade_datetimes = self.__trade_vars(action)
         
         
         profit            = 0.
         float_profit      = 0.
+        pip_change        = 0.
+        float_pip_change  = 0.
         closed_trade      = False
         sufficient_margin = True
+        margin_call       = False
 
+        # Open / Close trade
         if action in [const_action_dict['BUY'], const_action_dict['SELL']]:
             # Close open trades
             for trade_index, trade_price in enumerate(trade_prices):
-                profit += self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
+                trade_profit, trade_pip = self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
+                profit     += trade_profit
+                pip_change += trade_pip
                 
-                trade_dict['status'][trade_dict['datetime'].index(trade_datetimes[trade_index])] = const_status_dict['CLOSE']
+                self.trade_dict['status'][self.trade_dict['datetime'].index(trade_datetimes[trade_index])] = const_status_dict['CLOSE']
                 closed_trade = True
-                
-            profit *= self.trading_params_dict['unit']
-            profit = round(profit, 5)
 
-            # Add trade transaction
-            self.trading_params_dict['acct_bal'] += profit
-            price = self.__price_by_action(action, self.timestep['bid'], self.timestep['ask'], closed_trade)
-
-            # Add back free margin upon close trade
+            # Add back used margin upon close trade
             if closed_trade:
-                self.trading_params_dict['acct_bal'] += (len(trade_prices) * self.trading_params_dict['unit'])
+                self.close_trade(profit)
                 
             # Deduct required margin upon opening trade
             else:
-                required_margin = self.trading_params_dict['unit']
-                if self.trading_params_dict['acct_bal'] < required_margin:
+                required_margin = self.trade_unit / self.leverage
+                if self.usable_margin < required_margin:
                     sufficient_margin = False
-                self.trading_params_dict['acct_bal'] -= required_margin
+                
+                self.__update_used_margin(required_margin=required_margin)
             
-            # Update trade transaction
-            trade_dict['action'].append(action)
-            trade_dict['datetime'].append(self.timestep['datetime'])
-            trade_dict['price'].append(price)
-            trade_dict['status'].append(const_status_dict['CLOSE_TRADE'] if closed_trade else const_status_dict['OPEN'])
-            trade_dict['profits'].append(profit)
-            trade_dict['acct_bal'].append(self.trading_params_dict['acct_bal'])
+            if sufficient_margin:
+                # Add trade transaction
+                self.__add_transaction(action, profit, closed_trade=closed_trade)
 
-            # Observe the price at current timestemp if open or closed trades, else observe the entry price
-            self.update_observe_timestep()
+                # Observe the price at current timestemp if open or closed trades, else observe the entry price
+                self.update_observe_timestep()
         
         # Update trade variables
-        entry_action, trade_prices, trade_datetimes = self.__trade_vars(trade_dict)
+        entry_action, trade_prices, trade_datetimes = self.__trade_vars()
 
 
         # Done
         done = self.update_timestep(self.timestep['index'] +1)
         if not done:
-            # Stop trading if do not have sufficient balance, and there's no open trade
-            if (self.trading_params_dict['acct_bal'] < self.trading_params_dict['unit']) & (const_status_dict['OPEN'] not in trade_dict['status']):
+            # Stop trading if do not have enough usable margin to pay for required margin
+            if not sufficient_margin:
                 done = True
-                
-            # Stop trading if do not have enough balance to pay for required margin
-            elif not sufficient_margin:
-                done = True
-                
+
             # Consider closing trade as end of episode
-            elif closed_trade:
-               done = True
+            # elif closed_trade:
+            #     done = True
 
         # State
         if done:
@@ -375,14 +341,46 @@ class ForexEnv:
             float_profit = 0.
             if (entry_action != self.default_action) & (not closed_trade):
                 for trade_index, trade_price in enumerate(trade_prices):
-                    float_profit += self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
+                    trade_profit, trade_pip = self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
+                    float_profit += trade_profit
+                    float_pip_change += trade_pip
                 
-                float_profit *= self.trading_params_dict['unit']
-                float_profit = round(float_profit, 5)
+            self.__update_equity(float_profit)
 
-            buy_float_profit  = float_profit if entry_action == const_action_dict['BUY'] else 0
-            sell_float_profit = float_profit if entry_action == const_action_dict['SELL'] else 0
-            next_state = np.array([buy_float_profit, self.timestep['ask_rsi'], sell_float_profit, self.timestep['bid_rsi']])
+            # Observe profit
+            # buy_float_reward  = float_profit if entry_action == const_action_dict['BUY'] else 0
+            # sell_float_reward = float_profit if entry_action == const_action_dict['SELL'] else 0
+
+            # Observe pip change
+            buy_float_reward  = float_pip_change if entry_action == const_action_dict['BUY'] else 0
+            sell_float_reward = float_pip_change if entry_action == const_action_dict['SELL'] else 0
+
+            next_state = np.array([buy_float_reward, self.timestep['ask_rsi'], sell_float_reward, self.timestep['bid_rsi']])
+
+            # Margin call
+            if self.equity <= self.used_margin:
+                margin_call = True
+                done        = True
+                next_state  = np.array([0, 0, 0, 0])
+
+                self.__update_used_margin(used_margin=0)
+                self.acct_bal = self.equity
+
+                # Close open trades
+                for trade_index, trade_price in enumerate(trade_prices):
+                    self.trade_dict['status'][self.trade_dict['datetime'].index(trade_datetimes[trade_index])] = const_status_dict['CLOSE']
+
+                close_action = const_action_dict['SELL'] if entry_action == const_action_dict['BUY'] else \
+                               const_action_dict['BUY'] if entry_action == const_action_dict['SELL'] else \
+                               const_action_dict['HOLD']
+
+                profit           = float_profit
+                float_profit     = 0.
+                pip_change       = float_pip_change
+                float_pip_change = 0.
+
+                self.close_trade(profit)
+                self.__add_transaction(close_action, profit, margin_call=margin_call)
             
         self.state = next_state
         
@@ -390,13 +388,15 @@ class ForexEnv:
         self.stack_states = np.vstack([self.stack_states[1:], self.state])
         
         # Reward
-        reward = profit
+        # reward = profit
+        reward = pip_change
         
         # Additional information
         info_dict = {
             'closed_trade': closed_trade,
             'sufficient_margin': sufficient_margin,
+            'margin_call': margin_call,
             'float_profit': float_profit,
-            'have_open': len(trade_prices) > 0
+            'float_pip_change': float_pip_change
         }
         return (self.state, reward, done, info_dict)
