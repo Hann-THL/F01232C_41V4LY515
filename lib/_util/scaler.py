@@ -38,22 +38,22 @@ def clipping(x, max_value):
     if x < round(-max_value * .875, 0):
         return -1
 
-    if x > round(-max_value * .75, 0):
+    if x < round(-max_value * .75, 0):
         return -.875
 
-    if x > round(-max_value * .625, 0):
+    if x < round(-max_value * .625, 0):
         return -.75
 
     if x < round(-max_value * .5, 0):
         return -.625
 
-    if x > round(-max_value * .375, 0):
+    if x < round(-max_value * .375, 0):
         return -.5
 
     if x < round(-max_value * .25, 0):
         return -.375
 
-    if x > round(-max_value * .125, 0):
+    if x < round(-max_value * .125, 0):
         return -.25
 
     if x < 0:
