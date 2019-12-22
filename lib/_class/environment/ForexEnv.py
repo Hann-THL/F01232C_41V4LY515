@@ -305,9 +305,9 @@ class ForexEnv:
             if sufficient_margin:
                 # Add trade transaction
                 self.__add_transaction(action, profit, closed_trade=closed_trade)
-        
-        # Update trade variables
-        entry_action, trade_prices, trade_datetimes = self.__trade_vars()
+                
+                # Update trade variables
+                entry_action, trade_prices, trade_datetimes = self.__trade_vars()
 
 
         # Done
@@ -374,6 +374,9 @@ class ForexEnv:
 
                 self.close_trade(profit)
                 self.__add_transaction(close_action, profit, margin_call=margin_call)
+
+                # Update trade variables
+                entry_action, trade_prices, trade_datetimes = self.__trade_vars()
 
                 # Observe usable margin upon margin call
                 self.observe_usable_margin = self.usable_margin
