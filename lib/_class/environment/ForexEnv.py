@@ -153,8 +153,8 @@ class ForexEnv:
         norm_ump     = scaler.clipping(usable_margin_percentage, 100)
         norm_buy_fp  = scaler.clipping(buy_float_reward, self.estimate_max_reward)
         norm_sell_fp = scaler.clipping(sell_float_reward, self.estimate_max_reward)
-        norm_bid_rsi = np.round(bid_rsi / 100, 2)
-        norm_ask_rsi = np.round(ask_rsi / 100, 2)
+        norm_bid_rsi = round(bid_rsi / 100, 2)
+        norm_ask_rsi = round(ask_rsi / 100, 2)
 
         return np.array([norm_ump, norm_buy_fp, norm_ask_rsi, norm_sell_fp, norm_bid_rsi])
     
@@ -192,12 +192,13 @@ class ForexEnv:
         self.used_margin           = 0.
 
         self.trade_dict = {
-            'action':   [],
-            'datetime': [],
-            'price':    [],
-            'status':   [],
-            'profits':  [],
-            'acct_bal': []
+            'action':     [],
+            'datetime':   [],
+            'price':      [],
+            'status':     [],
+            'pip_change': [],
+            'profits':    [],
+            'acct_bal':   []
         }
         return self.state
     
@@ -241,7 +242,7 @@ class ForexEnv:
     def __update_usable_margin(self):
         self.usable_margin = round(self.equity - self.used_margin, 2)
 
-    def __add_transaction(self, action, profit, closed_trade=False, margin_call=False):
+    def __add_transaction(self, action, pip_change, profit, closed_trade=False, margin_call=False):
         const_status_dict = self.constant_values()['TRADE_STATUS']
         price             = self.__price_by_action(action, self.timestep['bid'], self.timestep['ask'])
 
@@ -251,6 +252,7 @@ class ForexEnv:
         self.trade_dict['status'].append(const_status_dict['MARGIN_CALL'] if margin_call else \
                                          const_status_dict['CLOSE_TRADE'] if closed_trade else \
                                          const_status_dict['OPEN'])
+        self.trade_dict['pip_change'].append(pip_change)
         self.trade_dict['profits'].append(profit)
         self.trade_dict['acct_bal'].append(self.acct_bal)
 
@@ -304,7 +306,7 @@ class ForexEnv:
             
             if sufficient_margin:
                 # Add trade transaction
-                self.__add_transaction(action, profit, closed_trade=closed_trade)
+                self.__add_transaction(action, pip_change, profit, closed_trade=closed_trade)
                 
                 # Update trade variables
                 entry_action, trade_prices, trade_datetimes = self.__trade_vars()
@@ -373,7 +375,7 @@ class ForexEnv:
                 float_pip_change = 0.
 
                 self.close_trade(profit)
-                self.__add_transaction(close_action, profit, margin_call=margin_call)
+                self.__add_transaction(close_action, pip_change, profit, margin_call=margin_call)
 
                 # Update trade variables
                 entry_action, trade_prices, trade_datetimes = self.__trade_vars()
@@ -401,10 +403,6 @@ class ForexEnv:
             'float_profit': float_profit,
             'float_pip_change': float_pip_change,
 
-            'have_open': len(trade_prices) > 0,
-            'entry_action': entry_action,
-
-            'ask_rsi': self.timestep.get('ask_rsi', 0),
-            'bid_rsi': self.timestep.get('bid_rsi', 0)
+            'have_open': len(trade_prices) > 0
         }
         return (self.state, reward, self.done, info_dict)
