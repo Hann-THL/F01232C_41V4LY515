@@ -12,12 +12,11 @@ Reference:
 - https://www.youtube.com/watch?v=RgmDywzNlZA
 '''
 class ForexEnv:
-    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.5, stack_size=5, timeframe=5):
+    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.5, stack_size=5):
         self.measure_unit = 10_000 if 'JPY' not in filename else 100
         self.leverage     = 10
         self.trade_unit   = 100_000
 
-        self.timeframe = timeframe
         self.__train_test_split(source_path, filename, nrows=nrows, train_size=train_size, train=train)
 
         self.random_range = int(len(self.indexes) * random_size)
@@ -122,7 +121,7 @@ class ForexEnv:
             movement = 0
 
         pip_change = round(movement * self.measure_unit, 1)
-        profit     = ((1 / self.measure_unit) / close_price) * self.trade_unit * pip_change
+        profit     = 0 if close_price == 0 else ((1 / self.measure_unit) / close_price) * self.trade_unit * pip_change
 
         return round(profit, 2), pip_change
     
@@ -141,7 +140,16 @@ class ForexEnv:
             return False
         
         except IndexError:
-            self.timestep = {}
+            self.timestep = {
+                'index':    -1,
+                'datetime': None,
+                
+                'bid':      0,
+                'bid_rsi':  0,
+                
+                'ask':      0,
+                'ask_rsi':  0
+            }
             return True
     
     def normalize_reward(self, reward):
@@ -312,77 +320,78 @@ class ForexEnv:
                 entry_action, trade_prices, trade_datetimes = self.__trade_vars()
 
 
-        # Done
+        # Next timetep
         self.done = self.update_timestep(self.timestep['index'] +1)
+
+        # Calculate floating P/L
+        float_profit = 0.
+        if (entry_action != self.default_action) & (not closed_trade):
+            for trade_index, trade_price in enumerate(trade_prices):
+                trade_profit, trade_pip = self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
+                float_profit += trade_profit
+                float_pip_change += trade_pip
+            
+        self.__update_equity(float_profit)
+
+        # Observe profit
+        # buy_float_reward  = float_profit if entry_action == const_action_dict['BUY'] else 0
+        # sell_float_reward = float_profit if entry_action == const_action_dict['SELL'] else 0
+
+        # Observe pip change
+        buy_float_reward  = float_pip_change if entry_action == const_action_dict['BUY'] else 0
+        sell_float_reward = float_pip_change if entry_action == const_action_dict['SELL'] else 0
+
+        # Usable margin %
+        usable_margin_percentage = round(self.usable_margin / self.observe_usable_margin * 100, 0)
+
+        # Next State
+        next_state = np.array([usable_margin_percentage, buy_float_reward, self.timestep['ask_rsi'], sell_float_reward, self.timestep['bid_rsi']])
+
+        # Margin call
+        if self.equity <= self.used_margin:
+            margin_call       = True
+            closed_trade      = True
+            sufficient_margin = False
+
+            self.__update_used_margin(used_margin=0)
+            self.acct_bal = self.equity
+
+            # Close open trades
+            for trade_index, trade_price in enumerate(trade_prices):
+                self.trade_dict['status'][self.trade_dict['datetime'].index(trade_datetimes[trade_index])] = const_status_dict['CLOSE']
+
+            close_action = const_action_dict['SELL'] if entry_action == const_action_dict['BUY'] else \
+                           const_action_dict['BUY'] if entry_action == const_action_dict['SELL'] else \
+                           const_action_dict['HOLD']
+
+            profit           = float_profit
+            float_profit     = 0.
+            pip_change       = float_pip_change
+            float_pip_change = 0.
+
+            self.close_trade(profit)
+            self.__add_transaction(close_action, pip_change, profit, margin_call=margin_call)
+
+            # Update trade variables
+            entry_action, trade_prices, trade_datetimes = self.__trade_vars()
+
+            # Observe usable margin upon margin call
+            self.observe_usable_margin = self.usable_margin
+
+
+        # Done
         if not self.done:
+            # Stop trading if hit margin call
+            if margin_call:
+                self.done = True
+
             # Stop trading if do not have enough usable margin to pay for required margin
             if not sufficient_margin:
                 self.done = True
 
-            # Consider closing trade as end of episode
-            # elif closed_trade:
-            #     self.done = True
-
         # State
         if self.done:
             next_state = np.array([0, 0, 0, 0, 0])
-        else:
-            # Calculate floating P/L
-            float_profit = 0.
-            if (entry_action != self.default_action) & (not closed_trade):
-                for trade_index, trade_price in enumerate(trade_prices):
-                    trade_profit, trade_pip = self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
-                    float_profit += trade_profit
-                    float_pip_change += trade_pip
-                
-            self.__update_equity(float_profit)
-
-            # Observe profit
-            # buy_float_reward  = float_profit if entry_action == const_action_dict['BUY'] else 0
-            # sell_float_reward = float_profit if entry_action == const_action_dict['SELL'] else 0
-
-            # Observe pip change
-            buy_float_reward  = float_pip_change if entry_action == const_action_dict['BUY'] else 0
-            sell_float_reward = float_pip_change if entry_action == const_action_dict['SELL'] else 0
-
-            # Usable margin %
-            usable_margin_percentage = round(self.usable_margin / self.observe_usable_margin * 100, 0)
-
-            # Next State
-            next_state = np.array([usable_margin_percentage, buy_float_reward, self.timestep['ask_rsi'], sell_float_reward, self.timestep['bid_rsi']])
-
-            # Margin call
-            if self.equity <= self.used_margin:
-                margin_call  = True
-                closed_trade = True
-                self.done    = True
-                next_state   = np.array([0, 0, 0, 0, 0])
-
-                self.__update_used_margin(used_margin=0)
-                self.acct_bal = self.equity
-
-                # Close open trades
-                for trade_index, trade_price in enumerate(trade_prices):
-                    self.trade_dict['status'][self.trade_dict['datetime'].index(trade_datetimes[trade_index])] = const_status_dict['CLOSE']
-
-                close_action = const_action_dict['SELL'] if entry_action == const_action_dict['BUY'] else \
-                               const_action_dict['BUY'] if entry_action == const_action_dict['SELL'] else \
-                               const_action_dict['HOLD']
-
-                profit           = float_profit
-                float_profit     = 0.
-                pip_change       = float_pip_change
-                float_pip_change = 0.
-
-                self.close_trade(profit)
-                self.__add_transaction(close_action, pip_change, profit, margin_call=margin_call)
-
-                # Update trade variables
-                entry_action, trade_prices, trade_datetimes = self.__trade_vars()
-
-                # Observe usable margin upon margin call
-                self.observe_usable_margin = self.usable_margin
-            
         self.state = next_state
         
         # Stacked states
