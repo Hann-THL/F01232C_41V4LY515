@@ -9,55 +9,31 @@ def zero_one_scale(x, precision=5):
     return np.round((1 + x / (1 + np.abs(x))) * .5, precision)
 
 def clipping(x, max_value):
-    # Positive
-    if x > round(max_value * .875, 0):
-        return 1
+    factor     = -1 if x < 0 else 1
+    percentage = abs(round(x / max_value, 3))
 
-    if x > round(max_value * .75, 0):
-        return .875
+    if percentage > .875:
+        return 1 * factor
 
-    if x > round(max_value * .625, 0):
-        return .75
+    if percentage > .75:
+        return .875 * factor
 
-    if x > round(max_value * .5, 0):
-        return .625
+    if percentage > .625:
+        return .75 * factor
 
-    if x > round(max_value * .375, 0):
-        return .5
+    if percentage > .5:
+        return .625 * factor
 
-    if x > round(max_value * .25, 0):
-        return .375
+    if percentage > .375:
+        return .5 * factor
 
-    if x > round(max_value * .125, 0):
-        return .25
+    if percentage > .25:
+        return .375 * factor
 
-    if x > 0:
-        return .125
+    if percentage > .125:
+        return .25 * factor
 
-    # Negative
-    if x < round(-max_value * .875, 0):
-        return -1
+    if percentage > 0:
+        return .125 * factor
 
-    if x < round(-max_value * .75, 0):
-        return -.875
-
-    if x < round(-max_value * .625, 0):
-        return -.75
-
-    if x < round(-max_value * .5, 0):
-        return -.625
-
-    if x < round(-max_value * .375, 0):
-        return -.5
-
-    if x < round(-max_value * .25, 0):
-        return -.375
-
-    if x < round(-max_value * .125, 0):
-        return -.25
-
-    if x < 0:
-        return -.125
-
-    # Neutral
     return 0
