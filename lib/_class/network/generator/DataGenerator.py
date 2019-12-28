@@ -2,6 +2,7 @@ import numpy as np
 
 from tensorflow.keras.utils import Sequence
 
+# Reference: https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
 class DataGenerator(Sequence):
     def __init__(self, inputs, targets, batch_size):
         self.inputs     = inputs
