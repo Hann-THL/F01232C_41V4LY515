@@ -28,6 +28,7 @@ class NNModel:
         outputs = self.__output_layer(layer)
     
         self.model = Model(inputs=inputs, outputs=outputs)
+        # Reference: https://stats.stackexchange.com/questions/351409/difference-between-rho-and-decay-arguments-in-keras-rmsprop
         self.model.compile(optimizer=RMSprop(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=MeanSquaredError())
         # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5.), loss=MeanSquaredError())
         
@@ -130,7 +131,7 @@ class NNModel:
         history = self.model.fit(inputs, targets, epochs=epochs, verbose=0, batch_size=len(inputs))
         
         # generator = DataGenerator(inputs, targets, batch_size=1)
-        # history   = self.model.fit_generator(generator, epochs=20, verbose=0,
+        # history   = self.model.fit_generator(generator, epochs=epochs, verbose=0,
         #                                      workers=4, steps_per_epoch=1, max_queue_size=1)
         return history
     
