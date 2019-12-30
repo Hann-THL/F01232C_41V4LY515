@@ -12,7 +12,7 @@ Reference:
 - https://www.youtube.com/watch?v=RgmDywzNlZA
 '''
 class ForexEnv:
-    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.5, stack_size=5):
+    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.5):
         self.measure_unit = 10_000 if 'JPY' not in filename else 100
         self.leverage     = 10
         self.trade_unit   = 100_000
@@ -20,7 +20,6 @@ class ForexEnv:
         self.__train_test_split(source_path, filename, nrows=nrows, train_size=train_size, train=train)
 
         self.random_range = int(len(self.indexes) * random_size)
-        self.stack_size   = stack_size
         
     def __train_test_split(self, source_path, filename, chunk_size=50_000, nrows=None, train_size=.7, train=True):
         source_file = f'{source_path}{filename}'
@@ -73,6 +72,9 @@ class ForexEnv:
                 'HOLD': 2
             }
         }
+        
+    def terminal_state(self):
+        return np.array([0, 0, 0, 0, 0])
         
     def state_space(self):
         return np.array(['usable_margin_percentage', 'buy_float_reward', 'ask_rsi', 'sell_float_reward', 'bid_rsi'])
@@ -170,35 +172,28 @@ class ForexEnv:
     def normalize_stack_states(self, stack_states):
         return stack_states
     
-    def reset(self, random=False):
-        self.default_action = self.constant_values()['TRADE_ACTION']['DEFAULT']
-
-        # Timestep
-        index = np.random.choice(self.indexes[:self.random_range]) if random else 0
-        index = self.stack_size -1 if index < self.stack_size else index
-        
-        # Stacked states
-        self.stack_states = np.empty((self.stack_size, self.state_size()))
-
-        for stack_index, x in enumerate(range(index +1 -self.stack_size, index +1)):
-            stack_state = np.array([100, 0, self.asks_rsi[x], 0, self.bids_rsi[x]])
-            self.stack_states[stack_index] = stack_state
-            
-        self.update_timestep(x)
-        
-        # State
-        self.state = stack_state
-
-        # Done
-        self.done  = False
-        
-        # Trading
-        self.acct_bal              = 10_500.
+    def __reset_tradestats(self):
+        self.acct_bal              = 15_000
         self.equity                = self.acct_bal
         self.usable_margin         = self.equity
         self.observe_usable_margin = self.usable_margin
         self.used_margin           = 0.
 
+    def reset(self, random=False):
+        self.default_action = self.constant_values()['TRADE_ACTION']['DEFAULT']
+
+        # Timestep
+        index = np.random.choice(self.indexes[:self.random_range]) if random else 0
+        self.update_timestep(index)
+        
+        # State
+        self.state = np.array([100, 0, self.timestep['ask_rsi'], 0, self.timestep['bid_rsi']])
+
+        # Done
+        self.done  = False
+        
+        # Trading
+        self.__reset_tradestats()
         self.trade_dict = {
             'action':     [],
             'datetime':   [],
@@ -386,23 +381,24 @@ class ForexEnv:
                 self.done = True
 
             # Stop trading if do not have enough usable margin to pay for required margin
-            if not sufficient_margin:
+            elif not sufficient_margin:
                 self.done = True
 
         # State
         if self.done:
-            next_state = np.array([0, 0, 0, 0, 0])
+            next_state = self.terminal_state()
         self.state = next_state
-        
-        # Stacked states
-        # NOTE: not to use np.vstack() as it's much slower
-        # self.stack_states = np.vstack([self.stack_states[1:], self.state])
-        self.stack_states = np.append(self.stack_states[1:], [self.state], axis=0)
         
         # Reward
         # reward = profit
         reward = pip_change
         
+        # Trade Done & State
+        trade_done       = (self.done or closed_trade)
+        trade_next_state = self.terminal_state() if trade_done else next_state
+        if trade_done:
+            self.__reset_tradestats()
+
         # Additional information
         info_dict = {
             'closed_trade': closed_trade,
@@ -412,6 +408,8 @@ class ForexEnv:
             'float_profit': float_profit,
             'float_pip_change': float_pip_change,
 
-            'have_open': len(trade_prices) > 0
+            'have_open': len(trade_prices) > 0,
+            'trade_done': trade_done,
+            'trade_next_state': trade_next_state
         }
         return (self.state, reward, self.done, info_dict)
