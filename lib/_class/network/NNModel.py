@@ -28,13 +28,16 @@ class NNModel:
         outputs = self.__output_layer(layer)
     
         self.model = Model(inputs=inputs, outputs=outputs)
-        # Reference: https://stats.stackexchange.com/questions/351409/difference-between-rho-and-decay-arguments-in-keras-rmsprop
+        # Reference:
+        # - https://stats.stackexchange.com/questions/351409/difference-between-rho-and-decay-arguments-in-keras-rmsprop
+        # - https://machinelearningmastery.com/how-to-avoid-exploding-gradients-in-neural-networks-with-gradient-clipping
+        # - https://stackoverflow.com/questions/42264567/keras-ml-library-how-to-do-weight-clipping-after-gradient-updates-tensorflow-b
         self.model.compile(optimizer=RMSprop(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=MeanSquaredError())
-        # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5.), loss=MeanSquaredError())
+        # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=MeanSquaredError())
         
         # Reference: https://medium.com/@jonathan_hui/rl-dqn-deep-q-network-e207751f7ae4
         # self.model.compile(optimizer=RMSprop(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=Huber(delta=1.0))
-        # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5.), loss=Huber(delta=1.0))
+        # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=Huber(delta=1.0))
     
     def __input_layer(self):
         if self.network_type == 'conv1d':
@@ -64,7 +67,7 @@ class NNModel:
             # - https://vincentblog.xyz/posts/dropout-and-batch-normalization
             layer = Dense(neuron,
                           kernel_initializer='he_uniform',
-                          kernel_constraint=max_norm(3),
+                          kernel_constraint=max_norm(5),
                           use_bias=False,
                           name=f'Hidden_{index}')(connected_layer if index == 0 else layer)
             
