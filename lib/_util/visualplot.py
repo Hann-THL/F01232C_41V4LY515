@@ -1,6 +1,7 @@
 import lib._util.fileproc as fp
 
 # Plotly
+import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from plotly.offline import init_notebook_mode, iplot, plot
@@ -8,7 +9,7 @@ init_notebook_mode(connected=True)
 
 import numpy as np
 
-def fast_stat(df):
+def faststat(df):
     na_count   = df.isna().sum()
     na_percent = na_count / len(df) * 100
     
@@ -20,6 +21,7 @@ def fast_stat(df):
     print('-------------------------------------------------------------------------')
     print('\n'.join(stats))
 
+# TODO - change to use plotly theme
 def figure(data, title=None, xlabel=None, ylabel=None):
     axis_dict = dict(
         title=xlabel,
@@ -48,8 +50,9 @@ def update_axis(fig, axis_count, gridcolor='rgb(159, 197, 232)'):
         fig['layout'][f'xaxis{suffix}']['gridcolor'] = gridcolor
         fig['layout'][f'yaxis{suffix}']['gridcolor'] = gridcolor
 
-def plot_graph(data, title, xlabel=None, ylabel=None, generate_file=True, out_path=None):
+def plot_graph(data, title, xlabel=None, ylabel=None, generate_file=True, out_path=None, layout_width=None, layout_height=None):
     fig = figure(data, title, xlabel, ylabel)
+    fig.update_layout(width=layout_width, height=layout_height)
 
     if generate_file:
         generate_plot(fig, out_path, title)
@@ -70,7 +73,7 @@ def generate_plot(fig, out_path=None, out_filename=None, axis_count=None):
         
         print(f'Generated: {out_file}')
 
-def plot_subplots(data, max_col, title, subplot_titles=None, out_path=None, showlegend=False, layout_height=None):
+def plot_subplots(data, max_col, title, subplot_titles=None, out_path=None, showlegend=False, layout_width=None, layout_height=None):
     max_row = int(np.ceil(len(data) / max_col))
     
     fig = make_subplots(rows=max_row, cols=max_col, subplot_titles=subplot_titles, x_title=title)
@@ -90,10 +93,10 @@ def plot_subplots(data, max_col, title, subplot_titles=None, out_path=None, show
 
         fig.add_trace(trace, row=row, col=col)
 
-    fig.update_layout(showlegend=showlegend, height=layout_height, plot_bgcolor='rgba(0, 0, 0, 0)')
+    fig.update_layout(showlegend=showlegend, width=layout_width, height=layout_height, plot_bgcolor='rgba(0, 0, 0, 0)')
     generate_plot(fig, out_path=out_path, out_filename=title, axis_count=len(data))
 
-def datagroups_subplots(data_groups, max_col, title, subplot_titles=None, out_path=None, showlegend=False, layout_height=None):
+def datagroups_subplots(data_groups, max_col, title, subplot_titles=None, out_path=None, showlegend=False, layout_width=None, layout_height=None):
     max_row = int(np.ceil(len(data_groups) / max_col))
     
     fig = make_subplots(rows=max_row, cols=max_col, subplot_titles=subplot_titles, x_title=title)
@@ -113,10 +116,10 @@ def datagroups_subplots(data_groups, max_col, title, subplot_titles=None, out_pa
         for data in data_group:
             fig.add_trace(data, row=row, col=col)
 
-    fig.update_layout(showlegend=showlegend, height=layout_height, plot_bgcolor='rgba(0, 0, 0, 0)', barmode='overlay')
+    fig.update_layout(showlegend=showlegend, width=layout_width, height=layout_height, plot_bgcolor='rgba(0, 0, 0, 0)', barmode='overlay')
     generate_plot(fig, out_path=out_path, out_filename=title, axis_count=len(data_groups))
 
-def histogram(df, title=None, out_path=None, layout_height=None):
+def histogram(df, title='Histogram', out_path=None, layout_width=None, layout_height=None):
     data = []
 
     for column in df.columns:
@@ -126,9 +129,9 @@ def histogram(df, title=None, out_path=None, layout_height=None):
 
     max_col = 2
     subplot_titles = [f'{x.lower()}' for x in df.columns]
-    plot_subplots(data, max_col, title, subplot_titles=subplot_titles, out_path=out_path, layout_height=layout_height)
+    plot_subplots(data, max_col, title, subplot_titles=subplot_titles, out_path=out_path, layout_width=layout_width, layout_height=layout_height)
 
-def boxplot(df, title, out_path=None, layout_height=None, numeric_only=True):
+def boxplot(df, title='Box-Plot', out_path=None, layout_width=None, layout_height=None, numeric_only=True):
     data = []
 
     columns = [k for k,v in df.dtypes.items() if 'float' in str(v) or 'int' in str(v)] if numeric_only else df.columns
@@ -141,9 +144,9 @@ def boxplot(df, title, out_path=None, layout_height=None, numeric_only=True):
 
     max_col = 2
     subplot_titles = [f'{x.lower()}' for x in columns]
-    plot_subplots(data, max_col, title, subplot_titles=subplot_titles, out_path=out_path, layout_height=layout_height)
+    plot_subplots(data, max_col, title, subplot_titles=subplot_titles, out_path=out_path, layout_width=layout_width, layout_height=layout_height)
 
-def violinplot(df, title, out_path=None, layout_height=None, numeric_only=True):
+def violinplot(df, title='Violin-Plot', out_path=None, layout_width=None, layout_height=None, numeric_only=True):
     data = []
 
     columns = [k for k,v in df.dtypes.items() if 'float' in str(v) or 'int' in str(v)] if numeric_only else df.columns
@@ -157,4 +160,25 @@ def violinplot(df, title, out_path=None, layout_height=None, numeric_only=True):
 
     max_col = 2
     subplot_titles = [f'{x.lower()}' for x in columns]
-    plot_subplots(data, max_col, title, subplot_titles=subplot_titles, out_path=out_path, layout_height=layout_height)
+    plot_subplots(data, max_col, title, subplot_titles=subplot_titles, out_path=out_path, layout_width=layout_width, layout_height=layout_height)
+
+def corrmatrix(df, title='Correlation Matrix', out_path=None, layout_width=None, layout_height=None):
+    corrmat = df.corr()
+    corrmat = corrmat.where(np.tril(np.ones(corrmat.shape), k=-1).astype(np.bool))
+
+    data = go.Heatmap(
+        x = corrmat.index,
+        y = corrmat.columns,
+        z = corrmat.values,
+        colorscale='RdBu'
+    )
+    plot_graph(data, title=title, out_path=out_path, layout_width=layout_width, layout_height=layout_height)
+
+def pairplot(df, title='Pair-Plot', out_path=None, layout_width=None, layout_height=None, numeric_only=True, category=None):
+    columns = [k for k,v in df.dtypes.items() if 'float' in str(v) or 'int' in str(v)] if numeric_only else df.columns
+
+    fig = px.scatter_matrix(df, dimensions=columns, color=category, title=title, opacity=.5)
+
+    fig.update_layout(width=layout_width, height=layout_height)
+    fig.update_traces(diagonal_visible=False, showupperhalf=False)
+    generate_plot(fig, out_path=out_path, out_filename=title)
