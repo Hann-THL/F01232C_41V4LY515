@@ -12,7 +12,7 @@ Reference:
 - https://www.youtube.com/watch?v=RgmDywzNlZA
 '''
 class ForexEnv:
-    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.5):
+    def __init__(self, source_path, filename, nrows=None, train_size=.7, train=True, random_size=.8):
         self.measure_unit = 10_000 if 'JPY' not in filename else 100
         self.leverage     = 10
         self.trade_unit   = 100_000
@@ -23,7 +23,7 @@ class ForexEnv:
         
     def __train_test_split(self, source_path, filename, chunk_size=50_000, nrows=None, train_size=.7, train=True):
         source_file = f'{source_path}{filename}'
-        df_chunks = pd.read_csv(source_file, sep=',',
+        df_chunks = pd.read_csv(source_file, sep=';',
                                 parse_dates=['datetime'],
                                 date_parser=lambda x: pd.to_datetime(x, format='%Y-%m-%d'),
                                 chunksize=chunk_size, nrows=nrows)
@@ -39,23 +39,24 @@ class ForexEnv:
 
         self.indexes   = timeseries_df.index.values
         self.datetimes = timeseries_df['datetime'].values
-        
         self.bids      = np.round(timeseries_df['bid'].values, 5)
-        self.bids_rsi  = np.round(timeseries_df['bid_rsi'].values, 0)
-        
         self.asks      = np.round(timeseries_df['ask'].values, 5)
-        self.asks_rsi  = np.round(timeseries_df['ask_rsi'].values, 0)
 
-        # Calculate estimated max. profit
-        # const_action_dict = self.constant_values()['TRADE_ACTION']
-        # min_ask           = self.asks.min()
-        # max_bid           = self.bids.max()
-        # max_buy_reward    = self.__profit_by_action(const_action_dict['BUY'], min_ask, max_bid, None)
-        # max_sell_reward   = self.__profit_by_action(const_action_dict['SELL'], max_bid, None, min_ask)
-        # self.estimate_max_reward = max(max_buy_reward, max_sell_reward)
-
-        # Calculate estimated max. pip change
-        self.estimate_max_reward  = round((np.max(self.bids) - np.min(self.asks)) * self.measure_unit, 1)
+        self.pca_1     = np.round(timeseries_df['pca_1'].values, 5)
+        self.pca_2     = np.round(timeseries_df['pca_2'].values, 5)
+        self.pca_3     = np.round(timeseries_df['pca_3'].values, 5)
+        self.pca_4     = np.round(timeseries_df['pca_4'].values, 5)
+        self.pca_5     = np.round(timeseries_df['pca_5'].values, 5)
+        self.pca_6     = np.round(timeseries_df['pca_6'].values, 5)
+        self.pca_7     = np.round(timeseries_df['pca_7'].values, 5)
+        self.pca_8     = np.round(timeseries_df['pca_8'].values, 5)
+        self.pca_9     = np.round(timeseries_df['pca_9'].values, 5)
+        self.pca_10    = np.round(timeseries_df['pca_10'].values, 5)
+        self.pca_11    = np.round(timeseries_df['pca_11'].values, 5)
+        self.pca_12    = np.round(timeseries_df['pca_12'].values, 5)
+        self.pca_13    = np.round(timeseries_df['pca_13'].values, 5)
+        self.pca_14    = np.round(timeseries_df['pca_14'].values, 5)
+        self.pca_15    = np.round(timeseries_df['pca_15'].values, 5)
         
     def constant_values(self):
         return {
@@ -74,10 +75,16 @@ class ForexEnv:
         }
         
     def terminal_state(self):
-        return np.array([0, 0, 0, 0, 0])
+        return np.array([0, -1,
+                         0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0])
         
     def state_space(self):
-        return np.array(['usable_margin_percentage', 'buy_float_reward', 'ask_rsi', 'sell_float_reward', 'bid_rsi'])
+        return np.array(['roi', 'entry_action',
+                         'pca_1', 'pca_2', 'pca_3', 'pca_4', 'pca_5',
+                         'pca_6', 'pca_7', 'pca_8', 'pca_9', 'pca_10',
+                         'pca_11', 'pca_12', 'pca_13', 'pca_14', 'pca_15'])
         
     def state_size(self):
         return len(self.state_space())
@@ -132,12 +139,24 @@ class ForexEnv:
             self.timestep = {
                 'index':    self.indexes[index],
                 'datetime': self.datetimes[index],
-                
                 'bid':      self.bids[index],
-                'bid_rsi':  self.bids_rsi[index],
-                
                 'ask':      self.asks[index],
-                'ask_rsi':  self.asks_rsi[index]
+
+                'pca_1':  self.pca_1[index],
+                'pca_2':  self.pca_2[index],
+                'pca_3':  self.pca_3[index],
+                'pca_4':  self.pca_4[index],
+                'pca_5':  self.pca_5[index],
+                'pca_6':  self.pca_6[index],
+                'pca_7':  self.pca_7[index],
+                'pca_8':  self.pca_8[index],
+                'pca_9':  self.pca_9[index],
+                'pca_10': self.pca_10[index],
+                'pca_11': self.pca_11[index],
+                'pca_12': self.pca_12[index],
+                'pca_13': self.pca_13[index],
+                'pca_14': self.pca_14[index],
+                'pca_15': self.pca_15[index]
             }
             return False
         
@@ -145,32 +164,34 @@ class ForexEnv:
             self.timestep = {
                 'index':    -1,
                 'datetime': None,
-                
                 'bid':      0,
-                'bid_rsi':  0,
-                
                 'ask':      0,
-                'ask_rsi':  0
+
+                'pca_1':  0,
+                'pca_2':  0,
+                'pca_3':  0,
+                'pca_4':  0,
+                'pca_5':  0,
+                'pca_6':  0,
+                'pca_7':  0,
+                'pca_8':  0,
+                'pca_9':  0,
+                'pca_10': 0,
+                'pca_11': 0,
+                'pca_12': 0,
+                'pca_13': 0,
+                'pca_14': 0,
+                'pca_15': 0
             }
             return True
     
-    def normalize_reward(self, reward):
-        return round(reward / self.estimate_max_reward, 2)
-
-    def normalize_state(self, state):
-        usable_margin_percentage, buy_float_reward, ask_rsi, sell_float_reward, bid_rsi = state
-
-        norm_ump     = scaler.clipping(usable_margin_percentage, 100)
-        norm_buy_fp  = scaler.clipping(buy_float_reward, self.estimate_max_reward)
-        norm_sell_fp = scaler.clipping(sell_float_reward, self.estimate_max_reward)
-        norm_bid_rsi = round(bid_rsi / 100, 2)
-        norm_ask_rsi = round(ask_rsi / 100, 2)
-
-        return np.array([norm_ump, norm_buy_fp, norm_ask_rsi, norm_sell_fp, norm_bid_rsi])
-    
     # TODO
-    def normalize_stack_states(self, stack_states):
-        return stack_states
+    def normalize_reward(self, reward):
+        return reward
+
+    # TODO
+    def normalize_state(self, state):
+        return state
     
     def __reset_tradestats(self):
         self.acct_bal              = 15_000
@@ -187,7 +208,10 @@ class ForexEnv:
         self.update_timestep(index)
         
         # State
-        self.state = np.array([100, 0, self.timestep['ask_rsi'], 0, self.timestep['bid_rsi']])
+        self.state = np.array([0, -1,
+                               self.timestep['pca_1'], self.timestep['pca_2'], self.timestep['pca_3'], self.timestep['pca_4'], self.timestep['pca_5'],
+                               self.timestep['pca_6'], self.timestep['pca_7'], self.timestep['pca_8'], self.timestep['pca_9'], self.timestep['pca_10'],
+                               self.timestep['pca_11'], self.timestep['pca_12'], self.timestep['pca_13'], self.timestep['pca_14'], self.timestep['pca_15']])
 
         # Done
         self.done  = False
@@ -273,6 +297,8 @@ class ForexEnv:
         entry_action, trade_prices, trade_datetimes = self.__trade_vars(action)
         
         
+        roi               = 0.
+        float_roi         = 0.
         profit            = 0.
         float_profit      = 0.
         pip_change        = 0.
@@ -291,6 +317,10 @@ class ForexEnv:
                 
                 self.trade_dict['status'][self.trade_dict['datetime'].index(trade_datetimes[trade_index])] = const_status_dict['CLOSE']
                 closed_trade = True
+
+            # Calculate ROI
+            if self.used_margin != 0:
+                roi = round(profit / self.used_margin, 5)
 
             # Add back used margin upon close trade
             if closed_trade:
@@ -328,19 +358,15 @@ class ForexEnv:
             
         self.__update_equity(float_profit)
 
-        # Observe profit
-        # buy_float_reward  = float_profit if entry_action == const_action_dict['BUY'] else 0
-        # sell_float_reward = float_profit if entry_action == const_action_dict['SELL'] else 0
-
-        # Observe pip change
-        buy_float_reward  = float_pip_change if entry_action == const_action_dict['BUY'] else 0
-        sell_float_reward = float_pip_change if entry_action == const_action_dict['SELL'] else 0
-
-        # Usable margin %
-        usable_margin_percentage = round(self.usable_margin / self.observe_usable_margin * 100, 0)
+        # Calculate floating ROI
+        if self.used_margin:
+            float_roi = round(float_profit / self.used_margin, 5)
 
         # Next State
-        next_state = np.array([usable_margin_percentage, buy_float_reward, self.timestep['ask_rsi'], sell_float_reward, self.timestep['bid_rsi']])
+        next_state = np.array([float_roi, entry_action,
+                               self.timestep['pca_1'], self.timestep['pca_2'], self.timestep['pca_3'], self.timestep['pca_4'], self.timestep['pca_5'],
+                               self.timestep['pca_6'], self.timestep['pca_7'], self.timestep['pca_8'], self.timestep['pca_9'], self.timestep['pca_10'],
+                               self.timestep['pca_11'], self.timestep['pca_12'], self.timestep['pca_13'], self.timestep['pca_14'], self.timestep['pca_15']])
 
         # Margin call
         if self.equity <= self.used_margin:
@@ -401,12 +427,15 @@ class ForexEnv:
 
         # Additional information
         info_dict = {
-            'closed_trade': closed_trade,
-            'sufficient_margin': sufficient_margin,
-            'margin_call': margin_call,
+            # 'closed_trade': closed_trade,
+            # 'sufficient_margin': sufficient_margin,
+            # 'margin_call': margin_call,
 
-            'float_profit': float_profit,
-            'float_pip_change': float_pip_change,
+            # 'float_profit': float_profit,
+            # 'float_pip_change': float_pip_change,
+
+            'roi': roi,
+            'float_roi': float_roi,
 
             'have_open': len(trade_prices) > 0,
             'trade_done': trade_done,
