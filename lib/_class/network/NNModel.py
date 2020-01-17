@@ -38,6 +38,11 @@ class NNModel:
         # Reference: https://medium.com/@jonathan_hui/rl-dqn-deep-q-network-e207751f7ae4
         # self.model.compile(optimizer=RMSprop(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=Huber(delta=1.0))
         # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=Huber(delta=1.0))
+
+        # Localize function
+        # Reference: https://pybit.es/faster-python.html
+        self.fn_predict = self.model.predict
+        self.fn_fit     = self.model.fit
     
     def __input_layer(self):
         if self.network_type == 'conv1d':
@@ -131,7 +136,7 @@ class NNModel:
         # Reference: https://lambdalabs.com/blog/tensorflow-2-0-tutorial-04-early-stopping/
         # epochs  = 20
         epochs  = 1
-        history = self.model.fit(inputs, targets, epochs=epochs, verbose=0, batch_size=len(inputs))
+        history = self.fn_fit(inputs, targets, epochs=epochs, verbose=0, batch_size=len(inputs))
         
         # generator = DataGenerator(inputs, targets, batch_size=1)
         # history   = self.model.fit_generator(generator, epochs=epochs, verbose=0,
@@ -139,4 +144,4 @@ class NNModel:
         return history
     
     def predict(self, inputs):
-        return self.model.predict(inputs, batch_size=len(inputs))
+        return self.fn_predict(inputs, batch_size=len(inputs))
