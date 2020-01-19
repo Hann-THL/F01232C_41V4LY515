@@ -97,16 +97,17 @@ class ForexEnv:
         return len(self.action_space())
         
     def available_actions(self):
-        const_status_dict = self.constant_values()['TRADE_STATUS']
         actions = self.action_space()
         
-        # Have open trades
-        if const_status_dict['OPEN'] in self.trade_dict['status']:
-            open_index  = self.trade_dict['status'].index(const_status_dict['OPEN'])
-            open_action = self.trade_dict['action'][open_index]
-
-            # Ensure agent is able to have only 1 open trade while trading
+        # NOTE: not to use .index() as it's much slower
+        # Ensure agent is able to have only 1 open trade while trading
+        try:
+            open_action = self.open_dict['action'][0]
             actions.remove(open_action)
+
+        except IndexError:
+            pass
+
         return actions
     
     def __price_by_action(self, action, bid, ask):
@@ -227,6 +228,15 @@ class ForexEnv:
             'profits':    [],
             'acct_bal':   []
         }
+        self.open_dict = {
+            'action':     [],
+            'datetime':   [],
+            'price':      [],
+            'status':     [],
+            'pip_change': [],
+            'profits':    [],
+            'acct_bal':   []
+        }
         return self.state
     
     def __trade_vars(self, action=None):
@@ -235,10 +245,8 @@ class ForexEnv:
         # - if there's entry action, treat current action as action to close a trade
         try:
             # NOTE: not to use pd.DataFrame() to convert trade_dict to dataframe, as it is slower
-            open_index      = self.trade_dict['status'].index(self.constant_values()['TRADE_STATUS']['OPEN'])
-            trade_actions   = self.trade_dict['action'][open_index:]
-            trade_prices    = self.trade_dict['price'][open_index:]
-            trade_datetimes = self.trade_dict['datetime'][open_index:]
+            trade_actions   = self.open_dict['action'][0:]
+            trade_prices    = self.open_dict['price'][0:]
             
             entry_action = trade_actions[0]
             
@@ -246,16 +254,14 @@ class ForexEnv:
             if entry_action == action:
                 trade_actions   = []
                 trade_prices    = []
-                trade_datetimes = []
             
-        except ValueError:
+        except IndexError:
             trade_actions   = []
             trade_prices    = []
-            trade_datetimes = []
 
             entry_action = self.default_action
 
-        return entry_action, trade_prices, trade_datetimes
+        return entry_action, trade_prices
 
     def __update_equity(self, float_profit):
         self.equity = self.acct_bal + float_profit
@@ -269,19 +275,48 @@ class ForexEnv:
     def __update_usable_margin(self):
         self.usable_margin = round(self.equity - self.used_margin, 2)
 
-    def __add_transaction(self, action, pip_change, profit, closed_trade=False, margin_call=False):
+    def __add_transaction(self, action, pip_change, profit, closed_trade=False, margin_call=False, done=False):
         const_status_dict = self.constant_values()['TRADE_STATUS']
         price             = self.__price_by_action(action, self.timestep['bid'], self.timestep['ask'])
 
-        self.trade_dict['action'].append(action)
-        self.trade_dict['datetime'].append(self.timestep['datetime'])
-        self.trade_dict['price'].append(price)
-        self.trade_dict['status'].append(const_status_dict['MARGIN_CALL'] if margin_call else \
-                                         const_status_dict['CLOSE_TRADE'] if closed_trade else \
-                                         const_status_dict['OPEN'])
-        self.trade_dict['pip_change'].append(pip_change)
-        self.trade_dict['profits'].append(profit)
-        self.trade_dict['acct_bal'].append(self.acct_bal)
+        # Stop trade
+        if closed_trade or margin_call or done:
+            self.trade_dict['action'].extend(self.open_dict['action'])
+            self.trade_dict['datetime'].extend(self.open_dict['datetime'])
+            self.trade_dict['price'].extend(self.open_dict['price'])
+            self.trade_dict['status'].extend([const_status_dict['CLOSE'] if closed_trade or margin_call else x
+                                              for x in self.open_dict['status']])
+            self.trade_dict['pip_change'].extend(self.open_dict['pip_change'])
+            self.trade_dict['profits'].extend(self.open_dict['profits'])
+            self.trade_dict['acct_bal'].extend(self.open_dict['acct_bal'])
+            self.open_dict = {
+                'action':     [],
+                'datetime':   [],
+                'price':      [],
+                'status':     [],
+                'pip_change': [],
+                'profits':    [],
+                'acct_bal':   []
+            }
+
+            if closed_trade or margin_call:
+                self.trade_dict['action'].append(action)
+                self.trade_dict['datetime'].append(self.timestep['datetime'])
+                self.trade_dict['price'].append(price)
+                self.trade_dict['status'].append(const_status_dict['MARGIN_CALL'] if margin_call else const_status_dict['CLOSE_TRADE'])
+                self.trade_dict['pip_change'].append(pip_change)
+                self.trade_dict['profits'].append(profit)
+                self.trade_dict['acct_bal'].append(self.acct_bal)
+
+        # Open trade
+        else:
+            self.open_dict['action'].append(action)
+            self.open_dict['datetime'].append(self.timestep['datetime'])
+            self.open_dict['price'].append(price)
+            self.open_dict['status'].append(const_status_dict['OPEN'])
+            self.open_dict['pip_change'].append(pip_change)
+            self.open_dict['profits'].append(profit)
+            self.open_dict['acct_bal'].append(self.acct_bal)
 
     def close_trade(self, profit):
         self.__update_used_margin(used_margin=0)
@@ -291,10 +326,8 @@ class ForexEnv:
     def step(self, action):
         assert not self.done, 'Environment reaches terminal, please reset the environment.'
 
-        const_action_dict = self.constant_values()['TRADE_ACTION']
-        const_status_dict = self.constant_values()['TRADE_STATUS']
-        
-        entry_action, trade_prices, trade_datetimes = self.__trade_vars(action)
+        const_action_dict          = self.constant_values()['TRADE_ACTION']
+        entry_action, trade_prices = self.__trade_vars(action)
         
         
         roi               = 0.
@@ -310,12 +343,10 @@ class ForexEnv:
         # Open / Close trade
         if action in [const_action_dict['BUY'], const_action_dict['SELL']]:
             # Close open trades
-            for trade_index, trade_price in enumerate(trade_prices):
+            for trade_price in trade_prices:
                 trade_profit, trade_pip = self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
-                profit     += trade_profit
-                pip_change += trade_pip
-                
-                self.trade_dict['status'][self.trade_dict['datetime'].index(trade_datetimes[trade_index])] = const_status_dict['CLOSE']
+                profit       += trade_profit
+                pip_change   += trade_pip
                 closed_trade = True
 
             # Calculate ROI
@@ -337,12 +368,12 @@ class ForexEnv:
             # Observe usable margin upon open / close trade
             self.observe_usable_margin = self.usable_margin
             
-            if sufficient_margin:
+            if sufficient_margin or closed_trade:
                 # Add trade transaction
                 self.__add_transaction(action, pip_change, profit, closed_trade=closed_trade)
                 
                 # Update trade variables
-                entry_action, trade_prices, trade_datetimes = self.__trade_vars()
+                entry_action, trade_prices = self.__trade_vars()
 
 
         # Next timetep
@@ -351,9 +382,9 @@ class ForexEnv:
         # Calculate floating P/L
         float_profit = 0.
         if (entry_action != self.default_action) & (not closed_trade):
-            for trade_index, trade_price in enumerate(trade_prices):
+            for trade_price in trade_prices:
                 trade_profit, trade_pip = self.__profit_by_action(entry_action, trade_price, self.timestep['bid'], self.timestep['ask'])
-                float_profit += trade_profit
+                float_profit     += trade_profit
                 float_pip_change += trade_pip
             
         self.__update_equity(float_profit)
@@ -377,10 +408,6 @@ class ForexEnv:
             self.__update_used_margin(used_margin=0)
             self.acct_bal = self.equity
 
-            # Close open trades
-            for trade_index, trade_price in enumerate(trade_prices):
-                self.trade_dict['status'][self.trade_dict['datetime'].index(trade_datetimes[trade_index])] = const_status_dict['CLOSE']
-
             close_action = const_action_dict['SELL'] if entry_action == const_action_dict['BUY'] else \
                            const_action_dict['BUY'] if entry_action == const_action_dict['SELL'] else \
                            const_action_dict['HOLD']
@@ -394,7 +421,7 @@ class ForexEnv:
             self.__add_transaction(close_action, pip_change, profit, margin_call=margin_call)
 
             # Update trade variables
-            entry_action, trade_prices, trade_datetimes = self.__trade_vars()
+            entry_action, trade_prices = self.__trade_vars()
 
             # Observe usable margin upon margin call
             self.observe_usable_margin = self.usable_margin
@@ -412,6 +439,7 @@ class ForexEnv:
 
         # State
         if self.done:
+            self.__add_transaction(entry_action, pip_change, profit, done=True)
             next_state = self.terminal_state()
         self.state = next_state
         
