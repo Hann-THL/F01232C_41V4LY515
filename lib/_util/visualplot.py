@@ -29,6 +29,7 @@ def figure(data, title=None, xlabel=None, ylabel=None):
     )
     xaxis_kwargs = {f'xaxis{x+1 if x != 0 else ""}': axis_dict
                     for x in range(50)}
+    axis_dict['title'] = ylabel
     yaxis_kwargs = {f'yaxis{x+1 if x != 0 else ""}': axis_dict
                     for x in range(50)}
 
