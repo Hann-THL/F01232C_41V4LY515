@@ -33,11 +33,9 @@ class NNModel:
         # - https://machinelearningmastery.com/how-to-avoid-exploding-gradients-in-neural-networks-with-gradient-clipping
         # - https://stackoverflow.com/questions/42264567/keras-ml-library-how-to-do-weight-clipping-after-gradient-updates-tensorflow-b
         self.model.compile(optimizer=RMSprop(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=MeanSquaredError())
-        # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=MeanSquaredError())
         
         # Reference: https://medium.com/@jonathan_hui/rl-dqn-deep-q-network-e207751f7ae4
         # self.model.compile(optimizer=RMSprop(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=Huber(delta=1.0))
-        # self.model.compile(optimizer=Adam(lr=alpha, clipnorm=5., rho=.95, epsilon=.01), loss=Huber(delta=1.0))
 
         # Localize function
         # Reference: https://pybit.es/faster-python.html
@@ -45,21 +43,7 @@ class NNModel:
         self.fn_fit     = self.model.fit
     
     def __input_layer(self):
-        if self.network_type == 'conv1d':
-            # Reference: https://towardsdatascience.com/how-to-use-convolutional-neural-networks-for-time-series-classification-56b1b0a07a57
-            # Convolutional layer
-            inputs = Input(shape=(None, self.state_size), name='Input')
-            inputs = Conv1D(filters=32, kernel_size=2, padding="same", name='Conv1D')(inputs)
-            inputs = Activation('relu', name='ReLU')(inputs)
-            inputs = GlobalMaxPooling1D(name='MaxPooling')(inputs)
-            inputs = Conv1D(filters=64, kernel_size=2, padding="same", name='Conv1D')(inputs)
-            inputs = Activation('relu', name='ReLU')(inputs)
-            inputs = GlobalMaxPooling1D(name='MaxPooling')(inputs)
-            inputs = Flatten(name='Flatten')(inputs)
-            
-        else:
-            inputs = Input(shape=(self.state_size,), name='Input')
-            
+        inputs = Input(shape=(self.state_size,), name='Input')
         return inputs
     
     def __hidden_layer(self, connected_layer):
@@ -75,17 +59,24 @@ class NNModel:
                           kernel_constraint=max_norm(5),
                           use_bias=False,
                           name=f'Hidden_{index}')(connected_layer if index == 0 else layer)
-            
-            # Reference: https://medium.com/luminovo/a-refresher-on-batch-re-normalization-5e0a1e902960
+
+            # Reference:
+            # - https://medium.com/luminovo/a-refresher-on-batch-re-normalization-5e0a1e902960
+            # - https://stackoverflow.com/questions/39691902/ordering-of-batch-normalization-and-dropout
+            # - https://blog.paperspace.com/busting-the-myths-about-batch-normalization/
             layer = BatchNormalization(scale=False, renorm=True, renorm_clipping={ 'rmax': 1, 'rmin': 0, 'dmax': 0 })(layer)
-            
+
             # Reference: https://medium.com/@danqing/a-practical-guide-to-relu-b83ca804f1f7
             layer = Activation('relu')(layer)
             # layer = LeakyReLU(alpha=.001)(layer)
             # layer = ELU()(layer)
             # layer = ReLU(max_value=6)(layer)
 
-            layer = Dropout(rate=.2)(layer)
+            # if index < len(self.neurons) -1:
+            #    # Reference:
+            #    # - https://towardsdatascience.com/machine-learning-part-20-dropout-keras-layers-explained-8c9f6dc4c9ab
+            #    # - https://forums.fast.ai/t/rethinking-batchnorm-dropout-combine-together-for-independent-component-layer/46232/4
+            #    layer = Dropout(rate=.2)(layer)
         return layer
     
     def __output_layer(self, connected_layer):
@@ -105,8 +96,8 @@ class NNModel:
         else:
             outputs = Dense(self.action_size,
                             kernel_initializer='he_uniform',
+                            kernel_constraint=max_norm(5),
                             name='Output')(connected_layer)
-            # outputs = BatchNormalization(scale=False, renorm=True, renorm_clipping={ 'rmax': 1, 'rmin': 0, 'dmax': 0 })(outputs)
             outputs = Activation('linear')(outputs)
             
         return outputs
