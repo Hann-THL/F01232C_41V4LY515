@@ -75,13 +75,13 @@ class ForexEnv:
         }
         
     def terminal_state(self):
-        return np.array([0, -1,
+        return np.array([0, 0, 0,
                          0, 0, 0, 0, 0,
                          0, 0, 0, 0, 0,
                          0, 0, 0, 0, 0])
         
     def state_space(self):
-        return np.array(['roi', 'entry_action',
+        return np.array(['buy_roi', 'sell_roi', 'enter_trade',
                          'pca_1', 'pca_2', 'pca_3', 'pca_4', 'pca_5',
                          'pca_6', 'pca_7', 'pca_8', 'pca_9', 'pca_10',
                          'pca_11', 'pca_12', 'pca_13', 'pca_14', 'pca_15'])
@@ -209,7 +209,7 @@ class ForexEnv:
         self.update_timestep(index)
         
         # State
-        self.state = np.array([0, -1,
+        self.state = np.array([0, 0, 0,
                                self.timestep['pca_1'], self.timestep['pca_2'], self.timestep['pca_3'], self.timestep['pca_4'], self.timestep['pca_5'],
                                self.timestep['pca_6'], self.timestep['pca_7'], self.timestep['pca_8'], self.timestep['pca_9'], self.timestep['pca_10'],
                                self.timestep['pca_11'], self.timestep['pca_12'], self.timestep['pca_13'], self.timestep['pca_14'], self.timestep['pca_15']])
@@ -394,7 +394,16 @@ class ForexEnv:
             float_roi = round(float_profit / self.used_margin, 5)
 
         # Next State
-        next_state = np.array([float_roi, entry_action,
+        if entry_action == const_action_dict['BUY']:
+        	buy_roi  = float_roi
+        	sell_roi = 0
+        elif entry_action == const_action_dict['SELL']:
+        	buy_roi  = 0
+        	sell_roi = float_roi
+        else:
+        	buy_roi  = 0
+        	sell_roi = 0
+        next_state = np.array([buy_roi, sell_roi, entry_action != self.default_action,
                                self.timestep['pca_1'], self.timestep['pca_2'], self.timestep['pca_3'], self.timestep['pca_4'], self.timestep['pca_5'],
                                self.timestep['pca_6'], self.timestep['pca_7'], self.timestep['pca_8'], self.timestep['pca_9'], self.timestep['pca_10'],
                                self.timestep['pca_11'], self.timestep['pca_12'], self.timestep['pca_13'], self.timestep['pca_14'], self.timestep['pca_15']])
@@ -465,6 +474,7 @@ class ForexEnv:
             'roi': roi,
             'float_roi': float_roi,
 
+            'entry_action': entry_action,
             'have_open': len(trade_prices) > 0,
             'trade_done': trade_done,
             'trade_next_state': trade_next_state
