@@ -83,9 +83,15 @@ class NNModel:
         if self.network_type == 'val-adv':
             # Reference: https://www.reddit.com/r/reinforcementlearning/comments/bu02ej/help_with_dueling_dqn/
             # Value & Advantage Layer
-            val = Dense(self.action_size, name='Value')(connected_layer)
+            val = Dense(1,
+                        kernel_initializer='he_uniform',
+                        kernel_constraint=max_norm(5),
+                        name='Value')(connected_layer)
             val = Activation('linear')(val)
-            adv = Dense(self.action_size, name='Advantage')(connected_layer)
+            adv = Dense(self.action_size,
+                        kernel_initializer='he_uniform',
+                        kernel_constraint=max_norm(5),
+                        name='Advantage')(connected_layer)
             adv = Activation('linear')(adv)
 
             # Output layer
