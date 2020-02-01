@@ -14,7 +14,7 @@ class D2QNAgent(DQNAgent):
                          model_file=model_file, neurons=neurons)
         
         # Target Network
-        self.hyperparams_dict['tau'] = .125
+        self.hyperparams_dict['tau'] = .01
         self.target_model = self.build_model(self.env.state_size(), self.env.action_size(),
                                              self.hyperparams_dict['alpha']['value'], neurons)
         self.target_model.set_weights(self.main_model.get_weights())
