@@ -6,7 +6,6 @@ from tensorflow.keras.utils import plot_model
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Input, Dense, Add, Subtract, Lambda
 from tensorflow.keras.layers import BatchNormalization, Dropout, Activation, ReLU, LeakyReLU, PReLU, ELU
-from tensorflow.keras.layers import Conv1D, MaxPool1D, GlobalMaxPooling1D, Flatten
 from tensorflow.keras.optimizers import RMSprop, Adam
 from tensorflow.keras.losses import Huber, MeanSquaredError
 from tensorflow.keras.constraints import max_norm
